@@ -81,10 +81,14 @@ Built — each with its own document under [docs/](docs/README.md):
 * **[Alerts](docs/04-alerts.md)** — an alert lifecycle over the event log:
   raise, escalate in place, resolve on observed recovery, dismiss with a
   reason, undo for five seconds. Alerts are episodes, not flags.
+* **[Geofences](docs/05-geofences.md)** — create, edit and deactivate circular
+  fences; entry/exit detected in SQL from event-time position history with a
+  hysteresis band, two-fix confirmation and a resumable containment state.
 
-Not built: geofences, trips, the scale exercise (§7–§9 of ARCHITECTURE.md).
+Not built: automatic trips, the scale exercise (§7.2 and §8–§9 of
+ARCHITECTURE.md).
 
-167 tests pass. Four carry the design:
+229 tests pass. Five carry the design:
 
 * `test/features/telemetry_ingest/ingest_pipeline_test.dart` — the same feed
   reversed, re-batched and partially redelivered produces byte-identical state
@@ -99,3 +103,7 @@ Not built: geofences, trips, the scale exercise (§7–§9 of ARCHITECTURE.md).
   escalation in place, recovery that must be *observed*, a hysteresis band, and
   a dismissal that survives resolution but not escalation. Two of its rules
   exist because running the real app disproved the first version.
+* `test/features/geofence/geofence_detector_test.dart` — deriving crossings one
+  fix at a time lands on byte-identical state to one pass over the finished
+  log, and a late fix replayed from scratch is indistinguishable from having
+  had the log in order.

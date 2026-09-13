@@ -4,6 +4,8 @@ import 'package:dart_duckdb/dart_duckdb.dart';
 
 import '../../../../core/error/exceptions.dart';
 import '../../../../db/alert_sql.dart';
+import '../../../../db/fleet_db.dart';
+import '../../../../db/geofence_sql.dart';
 import '../models/telemetry_packet_model.dart';
 
 /// The single writer.
@@ -119,6 +121,23 @@ class TelemetryWriter {
     }
   }
 
+  /// Writes one fence and re-derives every geofence.
+  ///
+  /// [row] is the whole fence, in column order, so create / rename / move /
+  /// deactivate / reactivate are one call. The recompute is the expensive part
+  /// and it is deliberate: see [recomputeAllGeofences].
+  Future<void> saveGeofence(List<Object?> row) async {
+    final reply = ReceivePort();
+    _commands.send(_GeofenceRequest(reply.sendPort, row));
+    final response = await reply.first as _WriteResponse;
+    reply.close();
+
+    final error = response.error;
+    if (error != null) {
+      throw LocalDatabaseException('geofence save failed', error);
+    }
+  }
+
   /// Closes the writer's connection and stops the isolate.
   Future<void> dispose() async {
     final reply = ReceivePort();
@@ -154,6 +173,15 @@ Future<void> _writerMain(_WriterBoot boot) async {
       commands.close();
       message.reply.send(null);
       return;
+    }
+    if (message is _GeofenceRequest) {
+      try {
+        await _saveGeofence(conn, message.row);
+        message.reply.send(const _WriteResponse());
+      } catch (error) {
+        message.reply.send(_WriteResponse(error: error.toString()));
+      }
+      continue;
     }
     if (message is _AlertRequest) {
       try {
@@ -202,6 +230,7 @@ Future<void> _createStagingTables(Connection conn) async {
       vehicle_id TEXT, event_ts TIMESTAMP, lat DOUBLE, lon DOUBLE, accuracy_m DOUBLE
     );
   ''');
+  await conn.execute(geofenceScopeDdl);
 }
 
 /// Inserts the fleet roster, skipping vehicles that are already there.
@@ -267,8 +296,10 @@ Future<IngestReceiptModel> _applyBatch(
   try {
     lateVehicles = await _countLateVehicles(conn);
     await evaluateAlerts(conn, now);
-    // Geofence transitions and trips slot in beside the alert evaluator, still
-    // before the watermark moves.
+    await _deriveGeofences(conn);
+    // Trips slot in beside the geofence detector, still before the watermark
+    // moves. Order matters: the detector reads the *previous* watermark to
+    // decide which vehicles have gone backwards and need a full replay.
     await _advanceWatermark(conn);
     await conn.execute('COMMIT');
   } catch (_) {
@@ -376,6 +407,34 @@ Future<void> _advanceLatest(Connection conn) async {
   ''');
 }
 
+/// Re-derives geofence containment for the vehicles in this batch.
+///
+/// Runs before [_advanceWatermark] on purpose: the scope query compares the
+/// batch's oldest fix against the watermark to tell an ordinary batch from one
+/// that reaches backwards, and once the watermark has moved that comparison is
+/// always false.
+Future<void> _deriveGeofences(Connection conn) async {
+  await conn.execute(clearGeofenceScope);
+  await conn.execute(insertGeofenceScope);
+  await deriveGeofences(conn);
+}
+
+/// Writes one fence and re-derives everything that depends on the geometry.
+///
+/// Its own transaction: a fence edit is a user action and must not be rolled
+/// back by an unrelated batch, nor hold the write lock waiting for one.
+Future<void> _saveGeofence(Connection conn, List<Object?> row) async {
+  await conn.execute('BEGIN TRANSACTION');
+  try {
+    await execPrepared(conn, upsertGeofence, row);
+    await recomputeAllGeofences(conn);
+    await conn.execute('COMMIT');
+  } catch (_) {
+    await conn.execute('ROLLBACK');
+    rethrow;
+  }
+}
+
 /// Applies one dismissal or one undo.
 ///
 /// Its own transaction: a user action must not be rolled back because an
@@ -385,9 +444,9 @@ Future<void> _applyAlertCommand(Connection conn, _AlertRequest request) async {
   await conn.execute('BEGIN TRANSACTION');
   try {
     if (at == null) {
-      await execAlertSql(conn, restoreAlert, [request.alertId]);
+      await execPrepared(conn, restoreAlert, [request.alertId]);
     } else {
-      await execAlertSql(conn, dismissAlert, [
+      await execPrepared(conn, dismissAlert, [
         request.alertId,
         at,
         request.reason,
@@ -520,6 +579,14 @@ class _SeedRequest {
 
   final SendPort reply;
   final List<List<Object?>> vehicles;
+}
+
+/// One fence to write, as a full row, and where to acknowledge it.
+class _GeofenceRequest {
+  const _GeofenceRequest(this.reply, this.row);
+
+  final SendPort reply;
+  final List<Object?> row;
 }
 
 /// Asks the writer to close its connection and stop.

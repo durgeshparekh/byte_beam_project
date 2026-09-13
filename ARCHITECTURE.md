@@ -374,9 +374,11 @@ See [docs/04-alerts.md](docs/04-alerts.md).
 
 ## 7. Geofences and trips
 
-### 6.1 Transition detection
+### 7.1 Transition detection
 
 Deterministic pipeline, applied per `(vehicle, geofence)` over event-time-ordered fixes:
+
+Built, as `lib/db/geofence_sql.dart`. See [docs/05-geofences.md](docs/05-geofences.md).
 
 1. **Accuracy gate** — discard fixes with `accuracy_m > 100`. Filtered at read; nothing is ever deleted from the log.
 2. **Hysteresis** — inside if `d ≤ r − h`, outside if `d ≥ r + h`, with `h = max(25 m, accuracy_m)`. Fixes in the band produce **no zone opinion**.
@@ -387,9 +389,13 @@ Deterministic pipeline, applied per `(vehicle, geofence)` over event-time-ordere
 7. **Overlaps** — no single "current geofence" internally; containment is per fence. The UI's single-value *current geofence* is the **smallest radius containing the vehicle**, tie-broken by `geofence_id`.
 8. **Fence activation** is time-versioned via `active_from` / `active_to`, so evaluation asks "was this fence active at the fix's event time" and recompute stays pure. **Geometry is not versioned** — editing centre or radius triggers a full recompute of that fence's transitions and the affected trips. Full geometry versioning is the upgrade if fences turn out to be edited often; it is not worth the table for this exercise.
 
-All of steps 2–6 are expressible with `lag`/`last_value IGNORE NULLS` window functions — set-based, no row-at-a-time Dart fold.
+All of steps 2–6 are expressible with `lag`/`last_value IGNORE NULLS` window functions — set-based, no row-at-a-time Dart fold. They are.
 
-### 6.2 Trips
+**One addition the build made.** A pass that starts at the batch would have to re-read a vehicle's whole history to know which zone was established before it, which defeats the point. `geofence_containment` holds, per (vehicle, fence), the confirmed zone *and* the last fix that had an opinion at all; the detector injects that as a synthetic first row, so a batch costs two fixes of work instead of a history. A batch reaching back behind the vehicle's watermark invalidates that seed, and the vehicle is replayed from the beginning of its log instead — §4 step 4 with `t0` collapsed to the whole vehicle, because a per-fix `t0` would need a containment *history*, which is a table this does not earn. The equivalence is asserted directly: fix-by-fix derivation lands on byte-identical state to one pass over the finished log.
+
+The same table answers the UI's two questions — which fence a truck is in, and how many are in each fence — so it is not overhead the detector imposed on the rest of the app.
+
+### 7.2 Trips
 
 A nested fence must not manufacture a trip: leaving a bay while still inside the depot is not a departure. So trips key off **containment count**, not individual fences:
 
@@ -477,8 +483,8 @@ The brief says the data model has genuinely ambiguous cases. These are the ones 
 | 6 | Signal goes stale while an alert is open | Alert stays open; the card reads "no fresh reading for 20m · last known 5 %". Resolution requires a fresh reading back inside the threshold, so no reading is never mistaken for recovery. **Built as specified** — the first implementation auto-resolved on staleness and had to be reversed. | Auto-resolve — that hides a truck that died at 5 % SOC. |
 | 7 | Dismissed at 18 %, then SOC hits 8 % | Escalating to critical clears `dismissed_at` and `dismiss_reason` on the same row. "I am on it" at 18 % is not consent to ignore 8 % — the user answered a question about a warning, and this is no longer that warning. | Staying dismissed through escalation. |
 | 8 | UNDO window vs. app kill | Dismissal is persisted immediately; UNDO clears it. Killed mid-window → dismissal stands. | Holding it in memory for 5 s — loses an explicit user action to a crash. |
-| 9 | Geofence edited after history exists | Activation is time-versioned; **geometry is not** — a geometry edit recomputes that fence's transitions and affected trips. | Full geometry versioning (correct, more table than this earns) or forward-only edits (cheap, but derived state stops being reproducible from the log). |
-| 10 | Vehicle inside two overlapping fences | Containment tracked per fence. UI "current geofence" = smallest radius containing it, tie-break `geofence_id`. | A single current-fence column — undefined under nesting. |
+| 9 | Geofence edited after history exists | Activation is time-versioned; **geometry is not** — saving a fence recomputes transitions. Built to recompute *every* fence rather than only the edited one: derived state is dropped and rebuilt (§3.5), and one path that is always right beats two that are usually right. Reactivating opens a *new* active window, so the period a fence was off stays off in any recompute. | Full geometry versioning (correct, more table than this earns) or forward-only edits (cheap, but derived state stops being reproducible from the log). |
+| 10 | Vehicle inside two overlapping fences | Containment tracked per fence. The UI's "current geofence" is a *query* — smallest radius containing it, tie-broken by `geofence_id` — not a stored field, so it cannot go stale against containment. | A single current-fence column — undefined under nesting, and a second thing to keep in step. |
 | 11 | Exiting a bay inside a depot | Trips key off containment count reaching 0, so leaving the inner fence starts nothing. | Per-fence exit starts a trip — one departure would produce two trips. |
 | 12 | Trip whose vehicle never reports again | Stays `IN_PROGRESS` forever. | A 24-hour abandonment timeout — invents an ending the data does not support. |
 | 14 | Which freshness window does the status ladder use? | The **vehicle-level 10-minute** window that decides OFFLINE, because status is a vehicle-level claim. The alert badge and the detail-screen verdict pills keep the **per-signal** `signal_spec.max_age_sec`, because a threshold is a claim about one signal. | One window for everything. Scoring the ladder against the 5-minute signal window leaves a dead band between 5 and 10 minutes where an online, visibly moving truck reads STOPPED — caught by a test, not by reasoning. |
@@ -496,6 +502,7 @@ Stated up front, per the brief.
 - **No background ingest while the app is killed.** No foreground service, no WorkManager.
 - **No severity/escalation audit trail.** The alert row carries `escalated_at`; the full state-change log is a table I would add the moment anyone asked "why did this fire".
 - **No i18n, no custom theme.** Material 3 defaults.
+- **The simulator moves vehicles across the ground 30x faster than their speed signal implies** (`SimulatorConfig.groundScale`). A truck at 60 km/h really does cover eight metres in a 500 ms tick, which means a geofence demo would need twenty minutes to show one crossing. The scale applies to latitude and longitude only — speed, odometer and battery drain stay consistent with each other and with the honest figure — and setting it to 1 gives a physically consistent feed.
 
 ---
 

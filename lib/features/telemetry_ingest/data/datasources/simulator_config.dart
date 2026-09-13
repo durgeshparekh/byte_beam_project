@@ -14,6 +14,7 @@ class SimulatorConfig {
     this.backlogChance = 0.004,
     this.backlogTicks = 20,
     this.seed = 1337,
+    this.groundScale = 30,
   });
 
   /// Fleet size. 500 for the scale exercise; a few dozen for a readable demo.
@@ -43,4 +44,22 @@ class SimulatorConfig {
   /// Fixes every random decision, so a test run is reproducible and a failure
   /// can be replayed exactly.
   final int seed;
+
+  /// How much faster a vehicle covers *ground* than its speedometer implies.
+  ///
+  /// The one deliberate lie in the simulator, and it is confined to the
+  /// latitude and longitude. A truck at 60 km/h really does move eight metres
+  /// in a 500 ms tick, which means a demo would need twenty minutes to show a
+  /// single geofence crossing. Speed, odometer and battery drain stay tied to
+  /// each other and to the honest figure; only the position runs ahead.
+  ///
+  /// Thirty, picked by measurement rather than taste. Heading wanders, so a
+  /// vehicle's displacement grows with the square root of the tick count, not
+  /// with it: at 15 the fleet covered ground but reached no fence inside a
+  /// minute, and the end-to-end test caught that. At 30 a step is ~250 m,
+  /// which still lands inside the smallest seeded fence — a 350 m bay — often
+  /// enough for the single-decisive-fix rule to confirm it.
+  ///
+  /// Set to 1 for a physically consistent feed.
+  final double groundScale;
 }

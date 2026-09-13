@@ -3,6 +3,7 @@ import 'package:byte_beam_project/core/utils/clock.dart';
 import 'package:byte_beam_project/core/utils/result.dart';
 import 'package:byte_beam_project/features/alerts/presentation/widgets/alert_card.dart';
 import 'package:byte_beam_project/features/fleet/domain/entities/vehicle_status.dart';
+import 'package:byte_beam_project/features/geofence/domain/entities/geofence.dart';
 import 'package:byte_beam_project/features/fleet/presentation/widgets/status_chip.dart';
 import 'package:byte_beam_project/features/vehicle_detail/domain/entities/reading_verdict.dart';
 import 'package:byte_beam_project/features/vehicle_detail/domain/entities/signal_reading_row.dart';
@@ -54,12 +55,16 @@ SignalReadingRow reading(
 VehicleDetail detailWith({
   List<SignalReadingRow> readings = const [],
   SocHistory history = const SocHistory.empty(),
+  String? currentGeofence,
+  List<GeofenceVisit> visits = const [],
 }) {
   return VehicleDetail(
     vehicleId: 'v1',
     regNo: 'KA01AB1234',
     model: 'eT 1000',
     status: VehicleStatus.idle,
+    currentGeofence: currentGeofence,
+    visits: visits,
     readings: readings,
     history: history,
     lastPing: now.subtract(const Duration(minutes: 2)),
@@ -245,6 +250,71 @@ void main() {
     await pump(tester, null);
 
     expect(find.text('No such vehicle in the roster.'), findsOneWidget);
+  });
+
+  // Containment comes from one table and the crossings from another, and the
+  // second is only the first folded up. Showing them together is how a
+  // disagreement between them would be visible.
+  testWidgets('the zone panel names the current fence and recent crossings', (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      detailWith(
+        currentGeofence: 'Depot Bay 3',
+        visits: [
+          GeofenceVisit(
+            geofenceName: 'Depot Bay 3',
+            isEntry: true,
+            at: now.subtract(const Duration(minutes: 4)),
+            isConfident: true,
+          ),
+          GeofenceVisit(
+            geofenceName: 'Hebbal Yard',
+            isEntry: false,
+            at: now.subtract(const Duration(minutes: 40)),
+            isConfident: true,
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('Depot Bay 3'), findsOneWidget);
+    expect(find.text('Entered Depot Bay 3'), findsOneWidget);
+    expect(find.text('Left Hebbal Yard'), findsOneWidget);
+    expect(find.text('4m ago'), findsOneWidget);
+  });
+
+  // Not being in a fence is a normal place for a truck to be, not missing
+  // data, so it gets a sentence rather than an em dash.
+  testWidgets('a vehicle in no fence reads as on the road', (tester) async {
+    await pump(tester, detailWith());
+
+    expect(find.text('On the road'), findsOneWidget);
+    expect(find.text('No crossings recorded yet.'), findsOneWidget);
+  });
+
+  testWidgets('a crossing confirmed across a gap is flagged', (tester) async {
+    await pump(
+      tester,
+      detailWith(
+        visits: [
+          GeofenceVisit(
+            geofenceName: 'Hebbal Yard',
+            isEntry: true,
+            at: now.subtract(const Duration(hours: 2)),
+            isConfident: false,
+          ),
+        ],
+      ),
+    );
+
+    expect(
+      find.byTooltip(
+        'Confirmed across a reporting gap — the time is approximate',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets("the vehicle's own alerts sit above the register", (

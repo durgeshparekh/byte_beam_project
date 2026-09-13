@@ -194,14 +194,18 @@ class SimulatedPacketSource implements TelemetryPacketSource {
     );
 
     // Straight-line drift with an occasional turn. Good enough to cross a
-    // geofence boundary, which is all the later features need.
+    // geofence boundary, which is all the geofence detector needs.
     if (_random.nextDouble() < 0.15) {
       vehicle.heading =
           (vehicle.heading + (_random.nextDouble() - 0.5) * 2) % (2 * pi);
     }
-    vehicle.lat += km / 111.0 * cos(vehicle.heading);
+    // Scaled: see `SimulatorConfig.groundScale`. Applied here and nowhere
+    // else, so odometer, battery drain and the speed signal stay consistent
+    // with one another.
+    final ground = km * config.groundScale;
+    vehicle.lat += ground / 111.0 * cos(vehicle.heading);
     vehicle.lon +=
-        km / (111.0 * cos(vehicle.lat * pi / 180)) * sin(vehicle.heading);
+        ground / (111.0 * cos(vehicle.lat * pi / 180)) * sin(vehicle.heading);
   }
 
   /// Exponential approach, so temperatures ramp instead of teleporting.

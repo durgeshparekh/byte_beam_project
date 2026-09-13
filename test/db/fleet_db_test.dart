@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:byte_beam_project/db/fleet_db.dart';
+import 'package:byte_beam_project/db/schema.dart';
 import 'package:dart_duckdb/dart_duckdb.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -52,10 +53,16 @@ void main() {
     final v = await second.read.query(
       'SELECT max(version) FROM schema_version',
     );
-    expect((v.fetchOne()!.first as num).toInt(), 1);
+    expect(
+      (v.fetchOne()!.first as num).toInt(),
+      migrations.length,
+      reason: 'every migration applied, and only once',
+    );
     // A re-applied migration would have duplicated the seed rows.
     final specs = await second.read.query('SELECT count(*) FROM signal_spec');
     expect((specs.fetchOne()!.first as num).toInt(), 6);
+    final fences = await second.read.query('SELECT count(*) FROM geofence');
+    expect((fences.fetchOne()!.first as num).toInt(), 4);
   });
 
   // The three assumptions ARCHITECTURE.md §1 rests on: a writer on another

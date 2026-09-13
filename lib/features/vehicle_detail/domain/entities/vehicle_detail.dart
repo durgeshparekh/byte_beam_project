@@ -1,4 +1,5 @@
 import '../../../fleet/domain/entities/vehicle_status.dart';
+import '../../../geofence/domain/entities/geofence.dart';
 import 'signal_reading_row.dart';
 import 'soc_history.dart';
 
@@ -11,7 +12,9 @@ class VehicleDetail {
     required this.status,
     required this.readings,
     required this.history,
+    required this.visits,
     this.lastPing,
+    this.currentGeofence,
   });
 
   final String vehicleId;
@@ -32,4 +35,16 @@ class VehicleDetail {
 
   /// Battery history over the retained window.
   final SocHistory history;
+
+  /// The fence the vehicle is in, or null when it is not in one.
+  ///
+  /// A single name for something that is genuinely a set: containment is
+  /// tracked per fence, and a truck in a bay inside a depot is inside two.
+  /// This is the most specific true answer — the smallest fence containing it
+  /// (ARCHITECTURE.md §10, ambiguity 10).
+  final String? currentGeofence;
+
+  /// Recent crossings, newest first. The visible evidence that the detector
+  /// runs at all; the containment above is only its latest conclusion.
+  final List<GeofenceVisit> visits;
 }

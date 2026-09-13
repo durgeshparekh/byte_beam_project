@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 
 import '../../../alerts/presentation/controllers/alerts_controller.dart';
 import '../../../alerts/presentation/pages/alerts_page.dart';
+import '../../../geofence/presentation/pages/geofences_page.dart';
 import '../../../telemetry_ingest/presentation/pages/ingest_page.dart';
 import '../../../vehicle_detail/presentation/pages/vehicle_detail_page.dart';
 import '../controllers/fleet_controller.dart';
@@ -21,6 +22,11 @@ class FleetPage extends GetView<FleetController> {
         title: const Text('Fleet'),
         actions: [
           const _AlertsAction(),
+          IconButton(
+            tooltip: 'Geofences',
+            icon: const Icon(Icons.map_outlined),
+            onPressed: () => Get.to(() => const GeofencesPage()),
+          ),
           IconButton(
             tooltip: 'Ingest monitor',
             icon: const Icon(Icons.monitor_heart_outlined),

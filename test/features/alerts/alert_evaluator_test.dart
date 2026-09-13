@@ -152,7 +152,7 @@ void main() {
         await reading('soc', 18, ago(1));
         await evaluate();
         final id = (await single())[0]! as String;
-        await execAlertSql(conn, dismissAlert, [id, now, 'on_it']);
+        await execPrepared(conn, dismissAlert, [id, now, 'on_it']);
 
         final later = now.add(const Duration(minutes: 5));
         await reading('soc', 8, later);
@@ -278,7 +278,7 @@ void main() {
 
   group('dismissal', () {
     Future<void> dismiss(String id, String reason) =>
-        execAlertSql(conn, dismissAlert, [id, now, reason]);
+        execPrepared(conn, dismissAlert, [id, now, reason]);
 
     test(
       'a dismissed alert still resolves when its condition clears',
@@ -336,7 +336,7 @@ void main() {
       final id = (await single())[0]! as String;
       await dismiss(id, 'wrong_alert');
 
-      await execAlertSql(conn, restoreAlert, [id]);
+      await execPrepared(conn, restoreAlert, [id]);
 
       final row = await single();
       expect(row[6], isNull);

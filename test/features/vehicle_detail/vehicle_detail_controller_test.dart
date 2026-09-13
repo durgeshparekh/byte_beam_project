@@ -29,6 +29,7 @@ class FakeVehicleDetailRepository implements VehicleDetailRepository {
         regNo: 'KA01${vehicleId.toUpperCase()}',
         model: 'eT 1000',
         status: VehicleStatus.idle,
+        visits: const [],
         readings: const [],
         history: const SocHistory.empty(),
         lastPing: now,

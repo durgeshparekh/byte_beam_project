@@ -76,3 +76,22 @@ Future<void> _migrate(Connection conn) async {
     }
   }
 }
+
+/// Runs a parameterised statement and discards the result.
+///
+/// Here rather than beside any one feature's SQL because three of them need
+/// it. Parameters rather than interpolation because most of these carry a
+/// timestamp, and interpolating one into SQL text is how time zones get lost.
+Future<void> execPrepared(
+  Connection conn,
+  String sql,
+  List<Object?> params,
+) async {
+  final statement = await conn.prepare(sql);
+  try {
+    statement.bindParams(params);
+    await statement.execute();
+  } finally {
+    await statement.dispose();
+  }
+}

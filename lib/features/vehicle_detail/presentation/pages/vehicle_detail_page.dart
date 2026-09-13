@@ -6,6 +6,7 @@ import '../../../alerts/presentation/controllers/alerts_controller.dart';
 import '../../../alerts/presentation/pages/alerts_page.dart';
 import '../../../alerts/presentation/widgets/alert_card.dart';
 import '../../../fleet/presentation/widgets/status_chip.dart';
+import '../../../geofence/presentation/widgets/zone_panel.dart';
 import '../controllers/vehicle_detail_controller.dart';
 import '../widgets/reading_row_tile.dart';
 import '../widgets/soc_sparkline.dart';
@@ -75,6 +76,15 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
             // this is where you find out what the dot meant, and it is the
             // screen you are on when you decide to act on it.
             _VehicleAlerts(vehicleId: widget.vehicleId, now: now),
+            _SectionTitle(
+              title: 'Location',
+              subtitle: 'Containment and crossings, folded from position fixes',
+            ),
+            ZonePanel(
+              currentGeofence: detail.currentGeofence,
+              visits: detail.visits,
+              now: now,
+            ),
             _SectionTitle(
               title: 'Readings',
               subtitle: 'Each signal ages on its own clock',

@@ -14,6 +14,8 @@ library;
 
 import 'package:dart_duckdb/dart_duckdb.dart';
 
+import 'fleet_db.dart';
+
 /// What makes an alert visible: not yet resolved, not yet dismissed.
 ///
 /// Resolution and dismissal are independent on purpose (ARCHITECTURE.md §6).
@@ -254,24 +256,8 @@ Future<void> evaluateAlerts(Connection conn, DateTime now) async {
   // reach the evaluator without the scratch table it needs.
   await conn.execute(alertConditionDdl);
   await conn.execute(clearAlertCondition);
-  await execAlertSql(conn, insertAlertCondition, [now]);
-  await execAlertSql(conn, resolveClearedAlerts, [now]);
-  await execAlertSql(conn, rescoreOpenAlerts, [now]);
-  await execAlertSql(conn, raiseNewAlerts, [now]);
-}
-
-/// Runs a parameterised statement. These take a timestamp, and interpolating
-/// one into SQL text is how time zones get lost.
-Future<void> execAlertSql(
-  Connection conn,
-  String sql,
-  List<Object?> params,
-) async {
-  final statement = await conn.prepare(sql);
-  try {
-    statement.bindParams(params);
-    await statement.execute();
-  } finally {
-    await statement.dispose();
-  }
+  await execPrepared(conn, insertAlertCondition, [now]);
+  await execPrepared(conn, resolveClearedAlerts, [now]);
+  await execPrepared(conn, rescoreOpenAlerts, [now]);
+  await execPrepared(conn, raiseNewAlerts, [now]);
 }

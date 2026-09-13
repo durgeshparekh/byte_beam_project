@@ -1,8 +1,10 @@
 import 'package:dart_duckdb/dart_duckdb.dart';
 
 import '../../../../core/error/exceptions.dart';
+import '../../../../db/geofence_sql.dart';
 import '../../../../db/vehicle_status_sql.dart';
 import '../../../fleet/domain/entities/vehicle_status.dart';
+import '../../../geofence/domain/entities/geofence.dart';
 import '../../domain/entities/soc_history.dart';
 import '../../domain/entities/vehicle_detail.dart';
 import '../models/signal_reading_row_model.dart';
@@ -47,6 +49,8 @@ class DuckDbVehicleDetailLocalDataSource
         lastPing: header.$4,
         readings: await _register(vehicleId, now),
         history: await _socHistory(vehicleId, now, window, maxPoints),
+        currentGeofence: await _currentGeofence(vehicleId),
+        visits: await _visits(vehicleId),
       );
     } catch (error) {
       throw LocalDatabaseException('vehicle detail query failed', error);
@@ -175,6 +179,32 @@ class DuckDbVehicleDetailLocalDataSource
     );
   }
 
+  /// The smallest active fence currently containing the vehicle, or null.
+  ///
+  /// Read from `geofence_containment` rather than recomputed from the log:
+  /// the detector already decided this on ingest, and asking the log again
+  /// would be a second implementation of the same rule.
+  Future<String?> _currentGeofence(String vehicleId) async {
+    final row = (await _query(currentGeofenceQuery, [vehicleId])).fetchOne();
+    return row?[0] as String?;
+  }
+
+  /// The vehicle's most recent crossings, newest first.
+  Future<List<GeofenceVisit>> _visits(String vehicleId) async {
+    final result = await _query(recentTransitionsQuery(_visitLimit), [
+      vehicleId,
+    ]);
+    return [
+      for (final row in result.fetchAll())
+        GeofenceVisit(
+          geofenceName: row[0]! as String,
+          isEntry: row[1] == 'ENTRY',
+          at: row[2]! as DateTime,
+          isConfident: row[3] != 'low',
+        ),
+    ];
+  }
+
   /// Prepares [sql] and binds [params] positionally.
   ///
   /// Positional, because these statements open with a `WITH` clause and
@@ -200,3 +230,9 @@ class DuckDbVehicleDetailLocalDataSource
 /// one expression. Signals missing from this list sort last.
 const _registerOrder =
     "['soc', 'range_km', 'speed', 'battery_temp', 'odometer', 'ignition']";
+
+/// How many crossings the detail screen shows.
+///
+/// Enough to see a pattern, few enough that the register stays the point of
+/// the screen. The full history is in `geofence_transition` either way.
+const _visitLimit = 8;

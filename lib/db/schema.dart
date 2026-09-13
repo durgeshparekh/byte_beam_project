@@ -6,7 +6,7 @@ library;
 /// Forward-only. Append a new entry; never edit a shipped one.
 /// See ARCHITECTURE.md §3.5 — class D tables are dropped and rebuilt rather
 /// than migrated, so most schema changes add nothing here.
-const List<String> migrations = [_v1];
+const List<String> migrations = [_v1, _v2];
 
 const _v1 = r'''
 -- ---------------------------------------------------------------- class R --
@@ -118,4 +118,52 @@ CREATE TABLE ingest_watermark (
   vehicle_id        TEXT PRIMARY KEY,
   processed_through TIMESTAMP NOT NULL
 );
+''';
+
+/// Geofences: the containment state table, and the seed fences.
+///
+/// A second migration rather than an edit to [_v1], because [_v1] has shipped
+/// to a database on my machine and forward-only means forward-only. The rule
+/// costs one extra string and buys the guarantee that a running install
+/// upgrades rather than resets.
+const _v2 = r'''
+-- ---------------------------------------------------------------- class D --
+-- Where each vehicle stands relative to each fence, as of the last derivation.
+--
+-- Earns its place three times over: it seeds the incremental detector (so a
+-- batch re-derives two fixes instead of a vehicle's whole history), it answers
+-- "which fence is this truck in" without touching the log, and it is what the
+-- live per-fence counts are counted from.
+--
+-- `zone` is the *confirmed* side. `pending_zone` is the last fix that had an
+-- opinion at all, which may be an unconfirmed candidate — the detector needs
+-- both to resume mid-stream without re-reading what it already folded.
+CREATE TABLE geofence_containment (
+  vehicle_id   TEXT NOT NULL,
+  geofence_id  TEXT NOT NULL,
+  zone         TEXT,
+  pending_zone TEXT,
+  pending_ts   TIMESTAMP,
+  PRIMARY KEY (vehicle_id, geofence_id)
+);
+
+-- ---------------------------------------------------------------- class L --
+-- Seed fences. Device-authored like any other fence: editable, deactivatable,
+-- and deleted by nothing. `active_from` predates the log so they see all of
+-- it; a fence created in the app starts active from the moment it is saved,
+-- which is why a new fence has no back-history.
+--
+-- Depot Bay 3 sits inside Whitefield Depot on purpose. A nested pair is the
+-- case that breaks a naive "current geofence" column and the case that
+-- manufactures a phantom trip out of a truck moving across its own yard
+-- (ARCHITECTURE.md §10, ambiguities 10 and 11).
+INSERT INTO geofence VALUES
+  ('gf-depot',  'Whitefield Depot',     12.9700, 77.6000, 2500,
+   TIMESTAMP '2000-01-01', NULL, TIMESTAMP '2000-01-01'),
+  ('gf-bay3',   'Depot Bay 3',          12.9710, 77.6015,  350,
+   TIMESTAMP '2000-01-01', NULL, TIMESTAMP '2000-01-01'),
+  ('gf-ecity',  'Electronic City Hub',  12.9250, 77.5600, 1800,
+   TIMESTAMP '2000-01-01', NULL, TIMESTAMP '2000-01-01'),
+  ('gf-hebbal', 'Hebbal Yard',          13.0200, 77.6500, 1500,
+   TIMESTAMP '2000-01-01', NULL, TIMESTAMP '2000-01-01');
 ''';
