@@ -1,0 +1,108 @@
+# Miscellaneous / OS
+*.class
+*.log
+*.pyc
+*.swp
+*.swo
+*.bak
+*.tmp
+*~
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ / Android Studio related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Visual Studio Code related
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+*.code-workspace
+
+# Flutter / Dart / Pub related
+**/doc/api/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+pubspec-overrides.yaml
+build/
+/build/
+coverage/
+/coverage/
+*.lcov
+
+# Symbolication & Obfuscation related
+app.*.symbols
+app.*.map.json
+
+# Android related
+/android/app/debug
+/android/app/profile
+/android/app/release
+**/android/.gradle/
+**/android/.cxx/
+**/android/.kotlin/
+**/android/**/captures/
+**/android/**/gradle-app.setting
+**/android/local.properties
+**/local.properties
+key.properties
+**/*.keystore
+**/*.jks
+*.apk
+*.aab
+
+# macOS / iOS / CocoaPods related
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/macos/Flutter/ephemeral/
+**/ios/Flutter/ephemeral/
+**/Pods/
+**/.symlinks/
+**/xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+DerivedData/
+
+# Embedded DuckDB / Local databases & WAL files
+# host duckdb library for `flutter test` (tool/fetch_duckdb_lib.sh)
+.duckdb/
+$DB*
+*.duckdb
+*.duckdb.wal
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Test scratch / probe files
+test/_probe*.dart
+test/_*.dart
+
+# Environment & local credentials
+.env
+.env.*
+!.env.example
+
+# AI conversation logs are committed; nothing here is generated
