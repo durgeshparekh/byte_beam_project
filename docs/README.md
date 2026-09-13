@@ -10,7 +10,7 @@ what was actually built and why it looks the way it does.
 | 01 | [Telemetry ingest](01-telemetry-ingest.md) | §2 local-first over DuckDB | Built |
 | 02 | [Fleet home](02-fleet-home.md) | §3 A | Built |
 | 03 | [Vehicle detail](03-vehicle-detail.md) | §3 B | Built |
-| — | Alerts, dismissal, undo | §3 C | Not built |
+| 04 | [Alerts, dismissal, undo](04-alerts.md) | §3 C | Built |
 | — | Geofences | §3 D | Not built |
 | — | Automatic trips | §3 E | Not built |
 | — | Scale exercise | §4 | Not built |

@@ -1,6 +1,7 @@
 import 'package:byte_beam_project/core/db/database_pulse.dart';
 import 'package:byte_beam_project/core/utils/clock.dart';
 import 'package:byte_beam_project/core/utils/result.dart';
+import 'package:byte_beam_project/features/alerts/domain/entities/fleet_alert.dart';
 import 'package:byte_beam_project/features/fleet/domain/entities/fleet_filter.dart';
 import 'package:byte_beam_project/features/fleet/domain/entities/fleet_overview.dart';
 import 'package:byte_beam_project/features/fleet/domain/entities/fleet_vehicle_summary.dart';
@@ -14,6 +15,8 @@ import 'package:byte_beam_project/features/fleet/presentation/widgets/status_chi
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+
+import '../alerts/alert_doubles.dart';
 
 /// Serves one canned overview, whatever is asked for.
 class StubFleetRepository implements FleetRepository {
@@ -49,7 +52,15 @@ void main() {
   tearDown(Get.reset);
 
   /// Mounts the page with [overview] already loaded.
-  Future<void> pump(WidgetTester tester, FleetOverview overview) async {
+  ///
+  /// The alerts controller comes along because the app bar reads the open
+  /// count from it — the fleet screen cannot be built without one.
+  Future<void> pump(
+    WidgetTester tester,
+    FleetOverview overview, {
+    StubAlertRepository? alerts,
+  }) async {
+    putStubAlerts(alerts ?? StubAlertRepository());
     Get.put(
       FleetController(
         getFleetOverview: GetFleetOverview(StubFleetRepository(overview)),
@@ -179,5 +190,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(Get.find<FleetController>().filter.value, FleetFilter.offline);
+  });
+
+  testWidgets('the app bar badges the number of open alerts', (tester) async {
+    await pump(
+      tester,
+      FleetOverview(
+        filter: FleetFilter.all,
+        vehicles: [summary('KA01AA0001', VehicleStatus.moving, soc: 8)],
+        counts: const {FleetFilter.all: 1, FleetFilter.moving: 1},
+      ),
+      alerts: StubAlertRepository([
+        testAlert(alertId: 'a1'),
+        testAlert(alertId: 'a2', type: AlertType.batteryOverheat),
+      ]),
+    );
+
+    expect(find.widgetWithText(Badge, '2'), findsOneWidget);
+  });
+
+  testWidgets('no open alerts means no badge at all', (tester) async {
+    await pump(
+      tester,
+      FleetOverview(
+        filter: FleetFilter.all,
+        vehicles: [summary('KA01AA0001', VehicleStatus.moving, soc: 62)],
+        counts: const {FleetFilter.all: 1, FleetFilter.moving: 1},
+      ),
+    );
+
+    expect(find.byType(Badge), findsNothing);
   });
 }

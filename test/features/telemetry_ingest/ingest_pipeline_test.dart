@@ -10,6 +10,11 @@ import '../../duckdb_support.dart';
 DateTime _at(int minute, [int second = 0]) =>
     DateTime.utc(2026, 1, 1, 10, minute, second);
 
+/// The wall clock every batch here is written at. These tests are about the
+/// log and the latest-value table, so it only has to be a fixed instant — the
+/// alert evaluator that also reads it has its own tests.
+final _now = _at(30);
+
 /// A packet carrying a single signal, which keeps the assertions readable.
 TelemetryPacketModel _packet(
   String vehicleId,
@@ -88,7 +93,7 @@ void main() {
         signals: {'soc': 54},
         location: const GeoFix(lat: 12.9, lon: 77.5, accuracyM: 6),
       ),
-    ]);
+    ], _now);
 
     expect(receipt.packets, 2);
     expect(receipt.signalRowsOffered, 3);
@@ -106,8 +111,8 @@ void main() {
       _packet('v1', _at(0), signals: {'soc': 55}),
     ];
 
-    final first = await local.applyBatch(batch);
-    final second = await local.applyBatch(batch);
+    final first = await local.applyBatch(batch, _now);
+    final second = await local.applyBatch(batch, _now);
 
     expect(first.signalRowsApplied, 1);
     expect(second.signalRowsOffered, 1);
@@ -123,7 +128,7 @@ void main() {
         _packet('v1', _at(0), signals: {'soc': 55}),
         _packet('v1', _at(0), signals: {'soc': 55}),
         _packet('v1', _at(0), signals: {'soc': 55}),
-      ]);
+      ], _now);
 
       expect(receipt.packets, 3);
       expect(
@@ -140,10 +145,10 @@ void main() {
     () async {
       await local.applyBatch([
         _packet('v1', _at(5), signals: {'soc': 40}),
-      ]);
+      ], _now);
       await local.applyBatch([
         _packet('v1', _at(1), signals: {'soc': 99}),
-      ]);
+      ], _now);
 
       final latest = await db.read.query(
         "SELECT event_ts, value FROM vehicle_signal_latest "
@@ -160,15 +165,15 @@ void main() {
   );
 
   test('a batch reaching behind the watermark is counted as late', () async {
-    await local.applyBatch([_packet('v1', _at(5))]);
-    final late = await local.applyBatch([_packet('v1', _at(2))]);
+    await local.applyBatch([_packet('v1', _at(5))], _now);
+    final late = await local.applyBatch([_packet('v1', _at(2))], _now);
 
     expect(late.lateVehicles, 1);
   });
 
   test('the watermark never moves backwards', () async {
-    await local.applyBatch([_packet('v1', _at(9))]);
-    await local.applyBatch([_packet('v1', _at(3))]);
+    await local.applyBatch([_packet('v1', _at(9))], _now);
+    await local.applyBatch([_packet('v1', _at(3))], _now);
 
     final watermark = await db.read.query(
       "SELECT processed_through FROM ingest_watermark WHERE vehicle_id = 'v1'",
@@ -197,7 +202,7 @@ void main() {
 
       // In order, once each.
       for (final packet in feed()) {
-        await local.applyBatch([packet]);
+        await local.applyBatch([packet], _now);
       }
       final ordered = await stateFingerprint();
 
@@ -216,6 +221,7 @@ void main() {
       for (var i = 0; i < messy.length; i += 5) {
         await local.applyBatch(
           messy.sublist(i, (i + 5).clamp(0, messy.length)),
+          _now,
         );
       }
       final scrambled = await stateFingerprint();

@@ -179,49 +179,70 @@ void main() {
   });
 
   group('alert badge', () {
-    Future<void> withBattery(double soc, DateTime ts) =>
-        vehicle('v1', signals: {'soc': (soc, ts), 'speed': (0, ago(1))});
+    /// Opens an alert row directly.
+    ///
+    /// Whether a reading *should* raise one is the evaluator's business and is
+    /// tested in `alert_evaluator_test`. This group asks a narrower question:
+    /// given a row in the alert table, what does the fleet list show? The
+    /// badge used to recompute thresholds itself, which meant a dismissed
+    /// alert kept its red dot on this screen.
+    Future<void> alert(
+      String id, {
+      String type = 'battery_low',
+      String severity = 'warning',
+      bool dismissed = false,
+      bool resolved = false,
+    }) {
+      final ts = "TIMESTAMP '${ago(2).toIso8601String()}'";
+      final dismissedAt = dismissed ? ts : 'NULL';
+      final resolvedAt = resolved ? ts : 'NULL';
+      return db.read.execute(
+        'INSERT INTO alert (alert_id, vehicle_id, alert_type, severity, '
+        'raised_at, resolved_at, dismissed_at) VALUES '
+        "('$id', 'v1', '$type', '$severity', $ts, $resolvedAt, $dismissedAt)",
+      );
+    }
 
-    test('below 20% is a warning', () async {
-      await withBattery(18, ago(1));
+    setUp(() => vehicle('v1', signals: {'speed': (0, ago(1))}));
+
+    test('an open warning shows a warning badge', () async {
+      await alert('a1');
       expect(
         (await only(FleetFilter.all)).alertSeverity,
         AlertSeverity.warning,
       );
     });
 
-    test('below 10% escalates to critical', () async {
-      await withBattery(6, ago(1));
+    test('an open critical shows a critical badge', () async {
+      await alert('a1', severity: 'critical');
       expect(
         (await only(FleetFilter.all)).alertSeverity,
         AlertSeverity.critical,
       );
     });
 
-    test('a healthy battery has no badge', () async {
-      await withBattery(64, ago(1));
+    test('critical outranks warning on the same vehicle', () async {
+      await alert('a1');
+      await alert('a2', type: 'battery_overheat', severity: 'critical');
+      expect(
+        (await only(FleetFilter.all)).alertSeverity,
+        AlertSeverity.critical,
+      );
+    });
+
+    test('no alerts, no badge', () async {
       expect((await only(FleetFilter.all)).alertSeverity, isNull);
     });
 
-    test('a stale low battery raises nothing', () async {
-      await withBattery(6, ago(40));
-      expect(
-        (await only(FleetFilter.all)).alertSeverity,
-        isNull,
-        reason: 'thresholds apply to fresh readings only',
-      );
+    // The reason the badge reads this table instead of recomputing thresholds.
+    test('a dismissed alert takes its badge with it', () async {
+      await alert('a1', dismissed: true);
+      expect((await only(FleetFilter.all)).alertSeverity, isNull);
     });
 
-    test('battery over 45C is critical', () async {
-      await vehicle(
-        'v1',
-        signals: {'battery_temp': (51, ago(1)), 'speed': (0, ago(1))},
-      );
-
-      expect(
-        (await only(FleetFilter.all)).alertSeverity,
-        AlertSeverity.critical,
-      );
+    test('a resolved alert leaves no badge behind', () async {
+      await alert('a1', resolved: true);
+      expect((await only(FleetFilter.all)).alertSeverity, isNull);
     });
   });
 

@@ -312,7 +312,10 @@ FROM vehicle v LEFT JOIN p USING (vehicle_id);
 
 ## 6. Alerts
 
-Evaluated over `vehicle_signal_latest ⋈ signal_spec`, **fresh readings only**, after every ingest batch.
+An alert row is an **episode**: one continuous period during which a rule was
+breached on a vehicle. `severity` moves within the episode; `resolved_at` ends
+it. Open means `resolved_at IS NULL AND dismissed_at IS NULL`, defined once in
+`alert_sql.dart` and read by the fleet badge and the alerts screen alike.
 
 | Alert | Condition | Severity |
 |---|---|---|
@@ -320,11 +323,52 @@ Evaluated over `vehicle_signal_latest ⋈ signal_spec`, **fresh readings only**,
 | `battery_low` | SOC < 10 % | **critical** (same row, escalated) |
 | `battery_overheat` | battery_temp > 45 °C | critical |
 
-The two SOC alerts are one row whose `severity` moves warning ⇄ critical. Recovering from 8 % to 15 % de-escalates in place; it does not resolve and re-raise.
+The two SOC bands are one row whose `severity` moves warning ⇄ critical.
+Recovering from 8 % to 15 % de-escalates in place; it does not resolve and
+re-raise. `escalated_at` is stamped on the way up and kept afterwards.
 
-**Dismissal.** Sheet order is fixed: *I am on it* · *Wrong alert* · *Something else…*. The dismissal is written to DuckDB immediately and UNDO clears `dismissed_at`. It is not held in memory for 5 seconds — local-first means the database is the truth, and if the app dies mid-window the dismissal stands. That is the honest trade; the alternative loses a user's explicit action to a crash.
+**The evaluator** runs after every ingest batch, in the same transaction as the
+watermark, as four statements in a fixed order: read what we can currently see
+from fresh readings, resolve what we watched come back inside, rescore what is
+still breached, raise what is new. Resolve before raise, so a condition that
+clears and re-triggers inside one batch closes one episode and opens another.
+`raise` is guarded by `NOT EXISTS` over open episodes, so the pass is
+idempotent — which is what lets it run unconditionally and what will let a
+late-suffix replay reuse it.
 
-**Resolution is independent.** The evaluator clears an alert when its condition clears, dismissed or not. A dismissed alert whose condition never clears simply stays hidden until the condition clears and re-triggers — dismissal suppresses the *episode*, not the *rule*.
+Freshness is applied *inside* the condition set: each reading is nulled out if
+it is older than its own `signal_spec.max_age_sec`, so "thresholds apply to
+fresh readings only" is a property of the data the rules read rather than a
+clause each rule remembers.
+
+**An episode ends when we watch it end, not when we stop looking.** A reading
+going quiet leaves the episode open — no reading is not evidence of recovery —
+and the card says "no fresh reading for 20m · last known 5 %". Resolution needs
+a fresh reading that is back inside the threshold by more than a hysteresis
+band of 2 (points of SOC, degrees of temperature). Without the band a truck
+idling at 45.2 °C opens and closes the same alert on every wobble: a measured
+simulator run produced **seven episodes on one vehicle in 114 seconds**. Since
+nothing in the lifecycle moves without a fresh reading, the evaluator needs no
+idle timer — time alone is not evidence.
+
+**Dismissal.** Sheet order is fixed: *I am on it* · *Wrong alert* · *Something
+else…*, read straight off the enum so the screen cannot drift from it. The
+dismissal is written to DuckDB immediately and UNDO clears `dismissed_at`. It
+is not held in memory for 5 seconds — local-first means the database is the
+truth, and if the app dies mid-window the dismissal stands. That is the honest
+trade; the alternative loses a user's explicit action to a crash.
+
+**Resolution is independent.** The evaluator clears an alert when its condition
+clears, dismissed or not. A dismissed alert whose condition never clears stays
+hidden until the condition clears and re-triggers — dismissal suppresses the
+*episode*, not the *rule*.
+
+**The fleet badge reads this table**, rather than recomputing thresholds in
+`scoredCte`. One rule in one place, and a dismissed alert stops showing a red
+dot on the list. The cost is that the badge is derived state: it lags the log
+by one derivation pass and can never lead it (§3.4).
+
+See [docs/04-alerts.md](docs/04-alerts.md).
 
 ---
 
@@ -430,14 +474,15 @@ The brief says the data model has genuinely ambiguous cases. These are the ones 
 | 3 | Event time or arrival time? | **Event time** drives every rule: freshness, status, alerts, transitions, trips. `ingest_ts` is audit only. | Arrival time — makes a backlog dump look like a fleet that just woke up. |
 | 4 | What is a duplicate? | Identity is `(vehicle_id, signal, event_ts)`. Same key, different value → keep the first, increment a conflict counter surfaced in a debug view. | Last-write-wins — non-deterministic under reordering, which breaks §0. |
 | 5 | Packet older than the retention window | Rejected and counted. It cannot be replayed correctly, so applying it would produce state that no longer follows from the log. | Silently inserting it and leaving derived state inconsistent. |
-| 6 | Signal goes stale while an alert is open | Alert stays open, shown with a stale marker. | Auto-resolve — that hides a truck that died at 5 % SOC. |
-| 7 | Dismissed at 18 %, then SOC hits 8 % | Escalation clears `dismissed_at` and re-raises. "I am on it" at 18 % is not consent to ignore 8 %. | Staying dismissed through escalation. |
+| 6 | Signal goes stale while an alert is open | Alert stays open; the card reads "no fresh reading for 20m · last known 5 %". Resolution requires a fresh reading back inside the threshold, so no reading is never mistaken for recovery. **Built as specified** — the first implementation auto-resolved on staleness and had to be reversed. | Auto-resolve — that hides a truck that died at 5 % SOC. |
+| 7 | Dismissed at 18 %, then SOC hits 8 % | Escalating to critical clears `dismissed_at` and `dismiss_reason` on the same row. "I am on it" at 18 % is not consent to ignore 8 % — the user answered a question about a warning, and this is no longer that warning. | Staying dismissed through escalation. |
 | 8 | UNDO window vs. app kill | Dismissal is persisted immediately; UNDO clears it. Killed mid-window → dismissal stands. | Holding it in memory for 5 s — loses an explicit user action to a crash. |
 | 9 | Geofence edited after history exists | Activation is time-versioned; **geometry is not** — a geometry edit recomputes that fence's transitions and affected trips. | Full geometry versioning (correct, more table than this earns) or forward-only edits (cheap, but derived state stops being reproducible from the log). |
 | 10 | Vehicle inside two overlapping fences | Containment tracked per fence. UI "current geofence" = smallest radius containing it, tie-break `geofence_id`. | A single current-fence column — undefined under nesting. |
 | 11 | Exiting a bay inside a depot | Trips key off containment count reaching 0, so leaving the inner fence starts nothing. | Per-fence exit starts a trip — one departure would produce two trips. |
 | 12 | Trip whose vehicle never reports again | Stays `IN_PROGRESS` forever. | A 24-hour abandonment timeout — invents an ending the data does not support. |
 | 14 | Which freshness window does the status ladder use? | The **vehicle-level 10-minute** window that decides OFFLINE, because status is a vehicle-level claim. The alert badge and the detail-screen verdict pills keep the **per-signal** `signal_spec.max_age_sec`, because a threshold is a claim about one signal. | One window for everything. Scoring the ladder against the 5-minute signal window leaves a dead band between 5 and 10 minutes where an online, visibly moving truck reads STOPPED — caught by a test, not by reasoning. |
+| 15 | A reading oscillating across a threshold | Resolution needs the value back inside by a **hysteresis band** of 2 (points of SOC, degrees of battery temperature); severity within an open episode moves on the bare thresholds. Found by measurement, not reasoning: a real run produced seven overheat episodes on one truck in 114 seconds. | Bare `value > threshold` for both raising and resolving — makes `raised_at` a lie and the episode record useless. |
 | 13 | GPS jitter on the boundary | 25 m (or accuracy, whichever larger) hysteresis band plus two-fix confirmation; band fixes carry the previous zone forward. | Bare `d < r` — flaps a parked truck into dozens of trips. |
 
 ---

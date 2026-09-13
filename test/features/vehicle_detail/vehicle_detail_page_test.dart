@@ -1,6 +1,7 @@
 import 'package:byte_beam_project/core/db/database_pulse.dart';
 import 'package:byte_beam_project/core/utils/clock.dart';
 import 'package:byte_beam_project/core/utils/result.dart';
+import 'package:byte_beam_project/features/alerts/presentation/widgets/alert_card.dart';
 import 'package:byte_beam_project/features/fleet/domain/entities/vehicle_status.dart';
 import 'package:byte_beam_project/features/fleet/presentation/widgets/status_chip.dart';
 import 'package:byte_beam_project/features/vehicle_detail/domain/entities/reading_verdict.dart';
@@ -14,6 +15,8 @@ import 'package:byte_beam_project/features/vehicle_detail/presentation/pages/veh
 import 'package:byte_beam_project/features/vehicle_detail/presentation/widgets/verdict_pill.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get/get.dart';
+
+import '../alerts/alert_doubles.dart';
 
 final now = DateTime.utc(2026, 1, 1, 12);
 
@@ -66,7 +69,14 @@ VehicleDetail detailWith({
 void main() {
   tearDown(Get.reset);
 
-  Future<void> pump(WidgetTester tester, VehicleDetail? value) async {
+  /// Mounts the detail screen. The alerts controller is required: this screen
+  /// renders the open alerts for the vehicle above the register.
+  Future<void> pump(
+    WidgetTester tester,
+    VehicleDetail? value, {
+    StubAlertRepository? alerts,
+  }) async {
+    putStubAlerts(alerts ?? StubAlertRepository());
     Get.put(
       VehicleDetailController(
         getVehicleDetail: GetVehicleDetail(StubRepository(value)),
@@ -235,5 +245,36 @@ void main() {
     await pump(tester, null);
 
     expect(find.text('No such vehicle in the roster.'), findsOneWidget);
+  });
+
+  testWidgets("the vehicle's own alerts sit above the register", (
+    tester,
+  ) async {
+    await pump(
+      tester,
+      detailWith(),
+      alerts: StubAlertRepository([
+        testAlert(vehicleId: 'v1', severity: AlertSeverity.critical),
+      ]),
+    );
+
+    expect(find.text('Low battery'), findsOneWidget);
+    expect(find.text('CRITICAL'), findsOneWidget);
+  });
+
+  testWidgets("another vehicle's alert does not appear here", (tester) async {
+    await pump(
+      tester,
+      detailWith(),
+      alerts: StubAlertRepository([testAlert(vehicleId: 'v2')]),
+    );
+
+    expect(find.text('Low battery'), findsNothing);
+  });
+
+  testWidgets('a clean vehicle gets no alert panel at all', (tester) async {
+    await pump(tester, detailWith());
+
+    expect(find.byType(AlertCard), findsNothing);
   });
 }

@@ -7,6 +7,7 @@ import '../../data/datasources/simulated_packet_source.dart';
 import '../../data/datasources/simulator_config.dart';
 import '../../data/datasources/telemetry_local_data_source.dart';
 import '../../data/datasources/telemetry_packet_source.dart';
+import '../../data/datasources/telemetry_writer_isolate.dart';
 import '../../data/repositories/telemetry_repository_impl.dart';
 import '../../domain/repositories/telemetry_repository.dart';
 import '../../domain/usecases/get_ingest_snapshot.dart';
@@ -43,9 +44,12 @@ class IngestBinding extends Bindings {
     final source = SimulatedPacketSource(clock: clock, config: config);
 
     Get.put<TelemetryLocalDataSource>(local, permanent: true);
+    // The single writer, registered on its own so the alerts feature can send
+    // dismissals through it without going via this feature's repository.
+    Get.put<TelemetryWriter>(local.writer, permanent: true);
     Get.put<TelemetryPacketSource>(source, permanent: true);
     Get.put<TelemetryRepository>(
-      TelemetryRepositoryImpl(local: local, source: source),
+      TelemetryRepositoryImpl(local: local, source: source, clock: clock),
       permanent: true,
     );
 

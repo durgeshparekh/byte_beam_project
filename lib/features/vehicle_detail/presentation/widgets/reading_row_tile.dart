@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/utils/format_age.dart';
 import '../../domain/entities/signal_reading_row.dart';
 import 'verdict_pill.dart';
 
@@ -76,12 +77,4 @@ class ReadingRowTile extends StatelessWidget {
     if (age == null) return 'never reported';
     return '${formatAge(age)} ago · stale after ${formatAge(row.maxAge)}';
   }
-}
-
-/// Compact duration formatting shared by the register and the header.
-String formatAge(Duration age) {
-  if (age.inSeconds < 60) return '${age.inSeconds}s';
-  if (age.inMinutes < 60) return '${age.inMinutes}m';
-  if (age.inHours < 48) return '${age.inHours}h';
-  return '${age.inDays}d';
 }

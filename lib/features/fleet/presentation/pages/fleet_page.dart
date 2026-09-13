@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../../alerts/presentation/controllers/alerts_controller.dart';
+import '../../../alerts/presentation/pages/alerts_page.dart';
 import '../../../telemetry_ingest/presentation/pages/ingest_page.dart';
 import '../../../vehicle_detail/presentation/pages/vehicle_detail_page.dart';
 import '../controllers/fleet_controller.dart';
@@ -18,6 +20,7 @@ class FleetPage extends GetView<FleetController> {
       appBar: AppBar(
         title: const Text('Fleet'),
         actions: [
+          const _AlertsAction(),
           IconButton(
             tooltip: 'Ingest monitor',
             icon: const Icon(Icons.monitor_heart_outlined),
@@ -70,5 +73,35 @@ class FleetPage extends GetView<FleetController> {
         );
       }),
     );
+  }
+}
+
+/// The alerts entry point, carrying the open count.
+///
+/// Reads the alerts controller rather than the fleet overview: the fleet query
+/// knows which vehicles have a badge, not how many alerts there are, and a
+/// vehicle can have two.
+class _AlertsAction extends StatelessWidget {
+  const _AlertsAction();
+
+  @override
+  Widget build(BuildContext context) {
+    final alerts = Get.find<AlertsController>();
+    return Obx(() {
+      final count = alerts.openCount;
+      final button = IconButton(
+        tooltip: 'Alerts',
+        icon: const Icon(Icons.notifications_outlined),
+        onPressed: () => Get.to(() => const AlertsPage()),
+      );
+      if (count == 0) return button;
+      return Badge.count(
+        count: count,
+        backgroundColor: alerts.hasCritical
+            ? Theme.of(context).colorScheme.error
+            : Colors.orange.shade700,
+        child: button,
+      );
+    });
   }
 }

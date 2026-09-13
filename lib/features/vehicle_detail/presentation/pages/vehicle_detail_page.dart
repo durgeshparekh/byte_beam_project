@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../../../core/utils/format_age.dart';
+import '../../../alerts/presentation/controllers/alerts_controller.dart';
+import '../../../alerts/presentation/pages/alerts_page.dart';
+import '../../../alerts/presentation/widgets/alert_card.dart';
 import '../../../fleet/presentation/widgets/status_chip.dart';
 import '../controllers/vehicle_detail_controller.dart';
 import '../widgets/reading_row_tile.dart';
@@ -66,6 +70,11 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
               now: now,
             ),
             const Divider(height: 1),
+            // Alerts for this vehicle, filtered out of the list the alerts
+            // controller already holds. The fleet list shows a red dot here;
+            // this is where you find out what the dot meant, and it is the
+            // screen you are on when you decide to act on it.
+            _VehicleAlerts(vehicleId: widget.vehicleId, now: now),
             _SectionTitle(
               title: 'Readings',
               subtitle: 'Each signal ages on its own clock',
@@ -158,5 +167,37 @@ class _SectionTitle extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// The open alerts for one vehicle, or nothing at all when there are none.
+///
+/// Deliberately renders nothing rather than an "all clear" panel: the readings
+/// register below already says every signal is normal, and a second widget
+/// saying the same thing pushes the register off the screen.
+class _VehicleAlerts extends StatelessWidget {
+  const _VehicleAlerts({required this.vehicleId, required this.now});
+
+  final String vehicleId;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = Get.find<AlertsController>();
+    return Obx(() {
+      final alerts = controller.forVehicle(vehicleId);
+      if (alerts.isEmpty) return const SizedBox.shrink();
+      return Column(
+        children: [
+          const SizedBox(height: 6),
+          for (final alert in alerts)
+            AlertCard(
+              alert: alert,
+              now: now,
+              onDismiss: () => dismissWithReason(context, controller, alert),
+            ),
+        ],
+      );
+    });
   }
 }

@@ -1,5 +1,6 @@
 import '../../../../core/error/exceptions.dart';
 import '../../../../core/error/failures.dart';
+import '../../../../core/utils/clock.dart';
 import '../../../../core/utils/result.dart';
 import '../../domain/entities/fleet_vehicle.dart';
 import '../../domain/entities/ingest_receipt.dart';
@@ -19,11 +20,18 @@ class TelemetryRepositoryImpl implements TelemetryRepository {
   const TelemetryRepositoryImpl({
     required TelemetryLocalDataSource local,
     required TelemetryPacketSource source,
+    required Clock clock,
   }) : _local = local,
-       _source = source;
+       _source = source,
+       _clock = clock;
 
   final TelemetryLocalDataSource _local;
   final TelemetryPacketSource _source;
+
+  /// Supplies the instant the alert evaluator scores freshness against. The
+  /// repository owns it rather than the writer because "now" is a decision
+  /// about the read of the world, and the writer should not be making one.
+  final Clock _clock;
 
   @override
   Future<Result<int>> seedFleet(List<FleetVehicle> vehicles) async {
@@ -48,7 +56,7 @@ class TelemetryRepositoryImpl implements TelemetryRepository {
       final batch = [
         for (final packet in packets) TelemetryPacketModel.fromEntity(packet),
       ];
-      return Ok(await _local.applyBatch(batch));
+      return Ok(await _local.applyBatch(batch, _clock.nowUtc()));
     } on LocalDatabaseException catch (error) {
       return Err(DatabaseFailure(error.message));
     }

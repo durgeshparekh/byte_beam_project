@@ -15,8 +15,11 @@ abstract class TelemetryLocalDataSource {
   /// Installs the fleet roster. Returns rows inserted; zero if already seeded.
   Future<int> seedFleet(List<FleetVehicle> vehicles);
 
-  /// Writes one batch durably.
-  Future<IngestReceiptModel> applyBatch(List<TelemetryPacketModel> batch);
+  /// Writes one batch durably, scoring alert freshness against [now].
+  Future<IngestReceiptModel> applyBatch(
+    List<TelemetryPacketModel> batch,
+    DateTime now,
+  );
 
   /// Reads current totals off disk.
   Future<IngestSnapshot> snapshot();
@@ -39,6 +42,14 @@ class DuckDbTelemetryLocalDataSource implements TelemetryLocalDataSource {
   /// Read connection, exposed for the feature screens that query directly.
   Connection get read => _db.read;
 
+  /// The process's single writer.
+  ///
+  /// Exposed so the alerts feature can write dismissals through the same
+  /// isolate. DuckDB takes one writer and the alert evaluator runs on this one
+  /// every tick, so a second write path would be racing it — see
+  /// [TelemetryWriter.dismissAlert].
+  TelemetryWriter get writer => _writer;
+
   /// Spawns the writer against an already-open database.
   static Future<DuckDbTelemetryLocalDataSource> create(FleetDb db) async {
     final writer = await TelemetryWriter.spawn(db.transferable);
@@ -57,8 +68,10 @@ class DuckDbTelemetryLocalDataSource implements TelemetryLocalDataSource {
   }
 
   @override
-  Future<IngestReceiptModel> applyBatch(List<TelemetryPacketModel> batch) =>
-      _writer.applyBatch(batch);
+  Future<IngestReceiptModel> applyBatch(
+    List<TelemetryPacketModel> batch,
+    DateTime now,
+  ) => _writer.applyBatch(batch, now);
 
   /// One query for all four numbers — four round trips would cost more than
   /// the aggregation does.

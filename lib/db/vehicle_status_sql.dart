@@ -6,6 +6,8 @@
 /// copies of this `CASE` would eventually disagree.
 library;
 
+import 'alert_sql.dart';
+
 /// How long without any report before a vehicle counts as offline.
 const offlineAfter = 'INTERVAL 10 MINUTE';
 
@@ -22,13 +24,15 @@ const offlineAfter = 'INTERVAL 10 MINUTE';
 /// Four stages, each earning its place:
 ///
 /// * `latest`  — pivots the long-format latest table into one row per vehicle.
-///   `FILTER` keeps it to a single pass, and the per-signal timestamps come
-///   along because freshness is judged per signal, not per vehicle.
+///   `FILTER` keeps it to a single pass. Only the signals the ladder actually
+///   consults are pivoted; battery temperature left when the badge stopped
+///   being computed here.
 /// * `ping`    — vehicle-level last ping is the newest event time from *any*
 ///   signal or position report (§10, ambiguity 2).
-/// * `spec`    — alert thresholds and staleness windows read from
-///   `signal_spec`, so they are configuration rather than constants buried in
-///   this string.
+/// * `badge`   — the worst open alert per vehicle, read from the `alert`
+///   table rather than recomputed from thresholds here. The badge and the
+///   alerts screen therefore cannot disagree, and a dismissed alert stops
+///   showing a red dot on the list.
 /// * `scored`  — the first-match-wins status and the alert badge.
 ///
 /// Two windows, deliberately different, because they back claims of different
@@ -41,9 +45,12 @@ const offlineAfter = 'INTERVAL 10 MINUTE';
 ///   scoring the ladder against the 5-minute per-signal window instead would
 ///   leave a dead band between 5 and 10 minutes where every online vehicle
 ///   reads STOPPED (§10, ambiguity 1).
-/// * The **alert badge** judges freshness per signal against
-///   `signal_spec.max_age_sec`, because the brief scopes thresholds to fresh
-///   readings and a threshold is a claim about one signal, not the vehicle.
+/// * The **alert badge** carries no window of its own. Freshness was already
+///   applied per signal, against `signal_spec.max_age_sec`, when the evaluator
+///   raised the alert (see `alert_sql.dart`) — the badge only reports what the
+///   evaluator concluded. That makes the badge *derived state*: it lags the
+///   log by one ingest batch and can never lead it, which is the rule for
+///   every class D table (§3.4).
 ///
 /// STOPPED is the `ELSE`: both "ignition off" and the documented fallback when
 /// the deciding signals are too stale to judge.
@@ -51,16 +58,13 @@ const scoredCte =
     '''
 WITH latest AS (
   SELECT vehicle_id,
-         max(value)    FILTER (WHERE signal = 'soc')          AS soc,
-         max(event_ts) FILTER (WHERE signal = 'soc')          AS soc_ts,
-         max(value)    FILTER (WHERE signal = 'range_km')     AS range_km,
-         max(value)    FILTER (WHERE signal = 'speed')        AS speed,
-         max(event_ts) FILTER (WHERE signal = 'speed')        AS speed_ts,
-         max(value)    FILTER (WHERE signal = 'ignition')     AS ignition,
-         max(event_ts) FILTER (WHERE signal = 'ignition')     AS ignition_ts,
-         max(value)    FILTER (WHERE signal = 'battery_temp') AS battery_temp,
-         max(event_ts) FILTER (WHERE signal = 'battery_temp') AS battery_temp_ts,
-         max(event_ts)                                        AS last_signal_ts
+         max(value)    FILTER (WHERE signal = 'soc')      AS soc,
+         max(value)    FILTER (WHERE signal = 'range_km') AS range_km,
+         max(value)    FILTER (WHERE signal = 'speed')    AS speed,
+         max(event_ts) FILTER (WHERE signal = 'speed')    AS speed_ts,
+         max(value)    FILTER (WHERE signal = 'ignition') AS ignition,
+         max(event_ts) FILTER (WHERE signal = 'ignition') AS ignition_ts,
+         max(event_ts)                                    AS last_signal_ts
   FROM vehicle_signal_latest
   GROUP BY vehicle_id
 ),
@@ -73,13 +77,13 @@ ping AS (
   )
   GROUP BY vehicle_id
 ),
-spec AS (
-  SELECT max(max_age_sec) FILTER (WHERE signal = 'soc')          AS soc_age,
-         max(max_age_sec) FILTER (WHERE signal = 'battery_temp') AS battery_temp_age,
-         max(warn_lo)     FILTER (WHERE signal = 'soc')          AS soc_warn_lo,
-         max(crit_lo)     FILTER (WHERE signal = 'soc')          AS soc_crit_lo,
-         max(crit_hi)     FILTER (WHERE signal = 'battery_temp') AS temp_crit_hi
-  FROM signal_spec
+badge AS (
+  SELECT vehicle_id,
+         CASE WHEN bool_or(severity = 'critical') THEN 'critical' ELSE 'warning' END
+           AS alert_severity
+  FROM alert
+  WHERE $openAlertPredicate
+  GROUP BY vehicle_id
 ),
 scored AS (
   SELECT v.vehicle_id,
@@ -100,18 +104,10 @@ scored AS (
              THEN 'IDLE'
            ELSE 'STOPPED'
          END AS status,
-         CASE
-           WHEN l.battery_temp_ts >= \$1 - to_seconds(s.battery_temp_age)
-            AND l.battery_temp > s.temp_crit_hi THEN 'critical'
-           WHEN l.soc_ts >= \$1 - to_seconds(s.soc_age)
-            AND l.soc < s.soc_crit_lo THEN 'critical'
-           WHEN l.soc_ts >= \$1 - to_seconds(s.soc_age)
-            AND l.soc < s.soc_warn_lo THEN 'warning'
-           ELSE NULL
-         END AS alert_severity
+         b.alert_severity
   FROM vehicle v
   LEFT JOIN latest l USING (vehicle_id)
   LEFT JOIN ping p USING (vehicle_id)
-  CROSS JOIN spec s
+  LEFT JOIN badge b USING (vehicle_id)
 )
 ''';

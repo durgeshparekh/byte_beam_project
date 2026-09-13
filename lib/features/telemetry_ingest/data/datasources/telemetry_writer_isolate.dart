@@ -3,6 +3,7 @@ import 'dart:isolate';
 import 'package:dart_duckdb/dart_duckdb.dart';
 
 import '../../../../core/error/exceptions.dart';
+import '../../../../db/alert_sql.dart';
 import '../models/telemetry_packet_model.dart';
 
 /// The single writer.
@@ -46,13 +47,19 @@ class TelemetryWriter {
 
   /// Applies one batch durably and returns what the database actually did.
   ///
+  /// [now] is the wall-clock instant the alert evaluator judges freshness
+  /// against. Passed in rather than read from `now()` inside the isolate so a
+  /// test can pin it — and so a backlog dump, whose event times are hours old,
+  /// is still scored against the present.
+  ///
   /// A fresh reply port per request keeps this free of request-id bookkeeping;
   /// the allocation is noise next to the write itself.
   Future<IngestReceiptModel> applyBatch(
     List<TelemetryPacketModel> batch,
+    DateTime now,
   ) async {
     final reply = ReceivePort();
-    _commands.send(_WriteRequest(reply.sendPort, batch));
+    _commands.send(_WriteRequest(reply.sendPort, batch, now));
     final response = await reply.first as _WriteResponse;
     reply.close();
 
@@ -79,6 +86,37 @@ class TelemetryWriter {
       throw LocalDatabaseException('fleet seed failed', error);
     }
     return response.inserted ?? 0;
+  }
+
+  /// Hides one alert and records why.
+  ///
+  /// Alert writes come through here for the same reason ingest does: DuckDB
+  /// takes one writer, and the evaluator updates these very rows on every
+  /// tick. Dismissing from the UI connection would race it, and the failure
+  /// mode — an optimistic-concurrency conflict — is a tap that silently does
+  /// nothing. This class is the process's single writer; that it lives in the
+  /// ingest feature is where it was born, not what it is.
+  Future<void> dismissAlert(String alertId, DateTime at, String reason) =>
+      _alertCommand(_AlertRequest(alertId: alertId, at: at, reason: reason));
+
+  /// Puts a dismissed alert back, for UNDO.
+  Future<void> restoreAlert(String alertId) =>
+      _alertCommand(_AlertRequest(alertId: alertId));
+
+  /// Sends one alert command and waits for it to commit.
+  ///
+  /// Awaited rather than fired and forgotten: UNDO is only honest if the
+  /// dismissal it reverses is already on disk.
+  Future<void> _alertCommand(_AlertRequest request) async {
+    final reply = ReceivePort();
+    _commands.send(request.withReply(reply.sendPort));
+    final response = await reply.first as _WriteResponse;
+    reply.close();
+
+    final error = response.error;
+    if (error != null) {
+      throw LocalDatabaseException('alert update failed', error);
+    }
   }
 
   /// Closes the writer's connection and stops the isolate.
@@ -117,6 +155,15 @@ Future<void> _writerMain(_WriterBoot boot) async {
       message.reply.send(null);
       return;
     }
+    if (message is _AlertRequest) {
+      try {
+        await _applyAlertCommand(conn, message);
+        message.reply!.send(const _WriteResponse());
+      } catch (error) {
+        message.reply!.send(_WriteResponse(error: error.toString()));
+      }
+      continue;
+    }
     if (message is _SeedRequest) {
       try {
         message.reply.send(
@@ -130,7 +177,9 @@ Future<void> _writerMain(_WriterBoot boot) async {
     final request = message as _WriteRequest;
     try {
       request.reply.send(
-        _WriteResponse(receipt: await _applyBatch(conn, request.batch)),
+        _WriteResponse(
+          receipt: await _applyBatch(conn, request.batch, request.now),
+        ),
       );
     } catch (error) {
       request.reply.send(_WriteResponse(error: error.toString()));
@@ -190,6 +239,7 @@ Future<int> _seedFleet(Connection conn, List<List<Object?>> vehicles) async {
 Future<IngestReceiptModel> _applyBatch(
   Connection conn,
   List<TelemetryPacketModel> batch,
+  DateTime now,
 ) async {
   final stopwatch = Stopwatch()..start();
 
@@ -216,9 +266,9 @@ Future<IngestReceiptModel> _applyBatch(
   final int lateVehicles;
   try {
     lateVehicles = await _countLateVehicles(conn);
-    // Derivation (alerts, geofence transitions, trips) slots in here, before
-    // the watermark moves. Until it exists the watermark simply records how
-    // far the log has been read.
+    await evaluateAlerts(conn, now);
+    // Geofence transitions and trips slot in beside the alert evaluator, still
+    // before the watermark moves.
     await _advanceWatermark(conn);
     await conn.execute('COMMIT');
   } catch (_) {
@@ -326,6 +376,30 @@ Future<void> _advanceLatest(Connection conn) async {
   ''');
 }
 
+/// Applies one dismissal or one undo.
+///
+/// Its own transaction: a user action must not be rolled back because an
+/// unrelated batch failed, and it must not wait for one either.
+Future<void> _applyAlertCommand(Connection conn, _AlertRequest request) async {
+  final at = request.at;
+  await conn.execute('BEGIN TRANSACTION');
+  try {
+    if (at == null) {
+      await execAlertSql(conn, restoreAlert, [request.alertId]);
+    } else {
+      await execAlertSql(conn, dismissAlert, [
+        request.alertId,
+        at,
+        request.reason,
+      ]);
+    }
+    await conn.execute('COMMIT');
+  } catch (_) {
+    await conn.execute('ROLLBACK');
+    rethrow;
+  }
+}
+
 /// Counts vehicles whose batch reaches back behind where derivation already
 /// ran. These are the replays that geofence transitions and trips will need.
 Future<int> _countLateVehicles(Connection conn) async {
@@ -398,10 +472,34 @@ class _WriterFailed {
 
 /// One batch to write, and where to send the receipt.
 class _WriteRequest {
-  const _WriteRequest(this.reply, this.batch);
+  const _WriteRequest(this.reply, this.batch, this.now);
 
   final SendPort reply;
   final List<TelemetryPacketModel> batch;
+
+  /// Instant the alert evaluator scores freshness against.
+  final DateTime now;
+}
+
+/// A dismissal, or — when [at] is null — the undo of one.
+///
+/// Built without a reply port and given one by [TelemetryWriter._alertCommand]
+/// so the two public methods stay one-liners.
+class _AlertRequest {
+  const _AlertRequest({
+    required this.alertId,
+    this.at,
+    this.reason,
+    this.reply,
+  });
+
+  final String alertId;
+  final DateTime? at;
+  final String? reason;
+  final SendPort? reply;
+
+  _AlertRequest withReply(SendPort port) =>
+      _AlertRequest(alertId: alertId, at: at, reason: reason, reply: port);
 }
 
 /// Either a receipt or the error string that replaced it.

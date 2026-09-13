@@ -43,7 +43,7 @@ void main() {
       if (batch.isNotEmpty) {
         await ingest.applyBatch([
           for (final p in batch) TelemetryPacketModel.fromEntity(p),
-        ]);
+        ], clock.nowUtc());
       }
       clock.advance(source.config.tick);
     }
@@ -139,18 +139,32 @@ void main() {
     expect(overview.countFor(FleetFilter.moving), 0);
   });
 
-  test('an offline vehicle shows no alert badge', () async {
-    final overview = await fleet.overview(
-      FleetFilter.offline,
-      lastTick.add(const Duration(minutes: 11)),
-    );
+  // The badge is derived state — it reports what the evaluator last concluded
+  // — and the evaluator does not resolve an alert just because its reading
+  // went quiet. A truck that dies at 5% keeps its badge, and the OFFLINE chip
+  // beside it carries the other half of the story (§10, ambiguity 6).
+  test(
+    'an offline vehicle keeps the badge it was last known to need',
+    () async {
+      final later = lastTick.add(const Duration(minutes: 11));
+      await ingest.applyBatch(const [], later);
 
-    expect(
-      overview.vehicles.every((v) => v.alertSeverity == null),
-      isTrue,
-      reason: 'stale readings must not raise thresholds',
-    );
-  });
+      final overview = await fleet.overview(FleetFilter.offline, later);
+
+      expect(
+        overview.countFor(FleetFilter.offline),
+        greaterThan(0),
+        reason: 'everything is offline by now',
+      );
+      expect(
+        overview.vehicles.where((v) => v.alertSeverity != null),
+        isNotEmpty,
+        reason:
+            'the simulator plants low-battery trucks; silence does not '
+            'clear them',
+      );
+    },
+  );
 
   test(
     'the overview reports a filtered-empty state, not a blank list',

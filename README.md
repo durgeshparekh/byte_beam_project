@@ -78,11 +78,13 @@ Built — each with its own document under [docs/](docs/README.md):
 * **[Vehicle detail](docs/03-vehicle-detail.md)** — readings register with a
   NORMAL / ALERT / STALE verdict per signal, and SOC history queried and
   bucketed out of the event log.
+* **[Alerts](docs/04-alerts.md)** — an alert lifecycle over the event log:
+  raise, escalate in place, resolve on observed recovery, dismiss with a
+  reason, undo for five seconds. Alerts are episodes, not flags.
 
-Not built: alerts, geofences, trips, the scale exercise (§6–§9 of
-ARCHITECTURE.md).
+Not built: geofences, trips, the scale exercise (§7–§9 of ARCHITECTURE.md).
 
-108 tests pass. Three carry the design:
+167 tests pass. Four carry the design:
 
 * `test/features/telemetry_ingest/ingest_pipeline_test.dart` — the same feed
   reversed, re-batched and partially redelivered produces byte-identical state
@@ -93,3 +95,7 @@ ARCHITECTURE.md).
 * `test/features/fleet/fleet_end_to_end_test.dart` — simulator to writer
   isolate to DuckDB to the fleet query with nothing stubbed, asserting every
   vehicle lands in exactly one chip.
+* `test/features/alerts/alert_evaluator_test.dart` — the alert state machine:
+  escalation in place, recovery that must be *observed*, a hysteresis band, and
+  a dismissal that survives resolution but not escalation. Two of its rules
+  exist because running the real app disproved the first version.

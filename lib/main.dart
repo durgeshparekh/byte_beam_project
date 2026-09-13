@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'core/db/database_pulse.dart';
 import 'db/fleet_db.dart';
+import 'features/alerts/presentation/bindings/alerts_binding.dart';
 import 'features/fleet/presentation/bindings/fleet_binding.dart';
 import 'features/fleet/presentation/pages/fleet_page.dart';
 import 'features/telemetry_ingest/presentation/bindings/ingest_binding.dart';
@@ -22,7 +23,9 @@ Future<void> main() async {
   Get.put<FleetDb>(db, permanent: true);
   Get.put(DatabasePulse(), permanent: true);
 
+  // Ingest first: it spawns the writer the alerts feature dismisses through.
   await IngestBinding(db: db).dependenciesAsync();
+  AlertsBinding(db: db).dependencies();
   FleetBinding(db: db).dependencies();
   VehicleDetailBinding(db: db).dependencies();
 
