@@ -111,3 +111,20 @@ scored AS (
   LEFT JOIN badge b USING (vehicle_id)
 )
 ''';
+
+/// The two statements one fleet-list refresh runs: the chip counts, and the
+/// rows for the selected chip.
+///
+/// Here rather than inline in the data source because the scale exercise
+/// benchmarks them (§8). A benchmark of a *different* query is worth less than
+/// no benchmark, and two copies of a statement are two chances to drift.
+const fleetCountsQuery =
+    '$scoredCte SELECT status, count(*) FROM scored GROUP BY status';
+
+/// Rows for one chip, or all of them when [where] is empty.
+///
+/// Ordered by registration so the list is stable between refreshes — an order
+/// that jumps as speeds change is unreadable.
+String fleetRowsQuery([String where = '']) =>
+    '$scoredCte SELECT vehicle_id, reg_no, model, status, soc, range_km, '
+    'speed, last_ping, alert_severity FROM scored $where ORDER BY reg_no';

@@ -12,8 +12,8 @@ what was actually built and why it looks the way it does.
 | 03 | [Vehicle detail](03-vehicle-detail.md) | §3 B | Built |
 | 04 | [Alerts, dismissal, undo](04-alerts.md) | §3 C | Built |
 | 05 | [Geofences](05-geofences.md) | §3 D | Built |
-| — | Automatic trips | §3 E | Not built |
-| — | Scale exercise | §4 | Not built |
+| 06 | [Automatic trips](06-trips.md) | §3 E | Built |
+| 07 | [Scale exercise](07-scale.md) | §4 | Built |
 
 Every document follows the same shape: what it does, the files, the data flow,
 the mechanics, the decisions with their rejected alternatives, the tests that

@@ -30,6 +30,7 @@ class FakeVehicleDetailRepository implements VehicleDetailRepository {
         model: 'eT 1000',
         status: VehicleStatus.idle,
         visits: const [],
+        trips: const [],
         readings: const [],
         history: const SocHistory.empty(),
         lastPing: now,

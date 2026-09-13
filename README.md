@@ -8,16 +8,43 @@ Design and the reasoning behind every ambiguous call:
 **[ARCHITECTURE.md](ARCHITECTURE.md)**. Per-feature technical documentation:
 **[docs/](docs/README.md)**.
 
-## Run
+## Run the app
 
 ```bash
 flutter pub get
-flutter run -d macos      # or: flutter run -d <android device>
+flutter run -d macos
 ```
 
-## Test
+Android works too (`flutter run -d <device>`); there is no `ios/` directory in
+this project, so iOS does not. Nothing else to set up — the database is created
+in application support on first launch, the roster is seeded, and the simulated
+feed starts before the first frame. Kill the app and relaunch it: the fleet
+list comes back off disk, which is the point of the exercise.
 
-`dart_duckdb` bundles its native library into the app for Android/iOS/macOS
+### The scale exercise, headless
+
+The three debug actions on the **Scale exercise** screen also run from the
+command line, printing their results to stdout as `[scale] …`. They are
+compile-time constants, so a build without the defines contains none of them.
+
+```bash
+# 500 vehicles, 2.1 M signal rows, generated inside DuckDB
+flutter run -d macos --release --dart-define=SCALE_BACKFILL=true
+
+# 100 warm runs of the fleet-list query, timed in the writer isolate
+flutter run -d macos --release --dart-define=SCALE_BENCH=true
+
+# retention: summarise, drop, checkpoint (the policy is 7 days; the demo
+# database only holds a couple of hours, hence the override)
+flutter run -d macos --release --dart-define=SCALE_COMPACT=true \
+                               --dart-define=SCALE_KEEP_MINUTES=60
+```
+
+Measured numbers, method and device: **[docs/07-scale.md](docs/07-scale.md)**.
+
+## Run the tests
+
+`dart_duckdb` bundles its native library into the app for Android and macOS
 builds, but `flutter test` runs on the host Dart VM where nothing has loaded
 it. Fetch a host copy once:
 
@@ -25,6 +52,32 @@ it. Fetch a host copy once:
 tool/fetch_duckdb_lib.sh
 flutter test
 ```
+
+## 30-second tour
+
+Everything below is reachable from the fleet list, and every screen is reading
+DuckDB rather than a list in memory.
+
+1. **Fleet list.** Filter chips carry live counts; both the counts and the
+   status behind them are decided in SQL, not in Dart. A red dot on a row means
+   an open alert.
+2. **Tap a vehicle.** The register gives every configured signal its own
+   NORMAL / ALERT / STALE verdict against its own freshness window — including
+   the ones that have never reported. Below it: the current geofence and recent
+   crossings, the trips derived from them, and a battery history bucketed out
+   of the event log by SQL.
+3. **Alerts** (bell, top right). Dismiss one, pick a reason, and the UNDO
+   snackbar stands for five seconds — the dismissal is already on disk, so
+   killing the app mid-window keeps it.
+4. **Geofences** (map). Four seeded fences with live occupancy, including
+   a bay nested inside a depot. Edit or deactivate one and every crossing and
+   trip is re-derived.
+5. **Trips** (route). Legs between fences, running ones first. A trip starts
+   when a vehicle leaves the *last* fence it was inside, so crossing the depot
+   yard manufactures nothing.
+6. **Ingest monitor** (heart rate) → **Scale exercise** (gauge). Session
+   counters beside what a fresh query returns, then the backfill, the
+   benchmark and the retention action.
 
 ## Dependency pin
 
@@ -36,7 +89,7 @@ names `^1.2.0`. It bundles the DuckDB **1.2.1** engine, so
 `tool/fetch_duckdb_lib.sh` fetches that same engine version for host tests.
 Re-check when 1.4.5 lands.
 
-Verified: `flutter test` (9 passing), `flutter build macos`, `flutter build apk`
+Verified: `flutter test`, `flutter build macos`, `flutter build apk`
 (`libduckdb.so` present for arm64-v8a and armeabi-v7a), and the macOS app
 creating and reopening its database in Application Support.
 
@@ -84,11 +137,16 @@ Built — each with its own document under [docs/](docs/README.md):
 * **[Geofences](docs/05-geofences.md)** — create, edit and deactivate circular
   fences; entry/exit detected in SQL from event-time position history with a
   hysteresis band, two-fix confirmation and a resumable containment state.
+* **[Automatic trips](docs/06-trips.md)** — legs derived from those crossings
+  on every batch: a trip starts when a vehicle's containment count reaches
+  zero, completes when it leaves zero, and carries an odometer distance. A
+  nested bay manufactures nothing.
+* **[Scale exercise](docs/07-scale.md)** — a debug action that backfills 500
+  vehicles and 2.17 M signal rows inside DuckDB, the three measurements the
+  brief asks for on a named machine, and a retention policy that is executed
+  rather than described.
 
-Not built: automatic trips, the scale exercise (§7.2 and §8–§9 of
-ARCHITECTURE.md).
-
-229 tests pass. Five carry the design:
+272 tests pass. Five carry the design:
 
 * `test/features/telemetry_ingest/ingest_pipeline_test.dart` — the same feed
   reversed, re-batched and partially redelivered produces byte-identical state

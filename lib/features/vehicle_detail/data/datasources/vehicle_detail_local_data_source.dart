@@ -2,9 +2,12 @@ import 'package:dart_duckdb/dart_duckdb.dart';
 
 import '../../../../core/error/exceptions.dart';
 import '../../../../db/geofence_sql.dart';
+import '../../../../db/trip_sql.dart';
 import '../../../../db/vehicle_status_sql.dart';
 import '../../../fleet/domain/entities/vehicle_status.dart';
 import '../../../geofence/domain/entities/geofence.dart';
+import '../../../trips/data/models/trip_model.dart';
+import '../../../trips/domain/entities/trip.dart';
 import '../../domain/entities/soc_history.dart';
 import '../../domain/entities/vehicle_detail.dart';
 import '../models/signal_reading_row_model.dart';
@@ -51,6 +54,7 @@ class DuckDbVehicleDetailLocalDataSource
         history: await _socHistory(vehicleId, now, window, maxPoints),
         currentGeofence: await _currentGeofence(vehicleId),
         visits: await _visits(vehicleId),
+        trips: await _trips(vehicleId),
       );
     } catch (error) {
       throw LocalDatabaseException('vehicle detail query failed', error);
@@ -205,6 +209,17 @@ class DuckDbVehicleDetailLocalDataSource
     ];
   }
 
+  /// The vehicle's most recent legs, newest first.
+  ///
+  /// Read here rather than through the trips feature's own data source so the
+  /// whole screen still comes from one round trip against one snapshot: two
+  /// reads could straddle an ingest commit and show a crossing whose trip is
+  /// not there yet.
+  Future<List<Trip>> _trips(String vehicleId) async {
+    final result = await _query(vehicleTripsQuery(_tripLimit), [vehicleId]);
+    return [for (final row in result.fetchAll()) TripModel.fromRow(row)];
+  }
+
   /// Prepares [sql] and binds [params] positionally.
   ///
   /// Positional, because these statements open with a `WITH` clause and
@@ -236,3 +251,7 @@ const _registerOrder =
 /// Enough to see a pattern, few enough that the register stays the point of
 /// the screen. The full history is in `geofence_transition` either way.
 const _visitLimit = 8;
+
+/// How many legs the detail screen shows. Same reasoning as [_visitLimit], one
+/// shorter because a trip row says more than a crossing row.
+const _tripLimit = 6;

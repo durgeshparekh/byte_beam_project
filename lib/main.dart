@@ -4,12 +4,14 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'core/db/database_pulse.dart';
+import 'core/utils/cold_start.dart';
 import 'db/fleet_db.dart';
 import 'features/alerts/presentation/bindings/alerts_binding.dart';
 import 'features/fleet/presentation/bindings/fleet_binding.dart';
 import 'features/geofence/presentation/bindings/geofence_binding.dart';
 import 'features/fleet/presentation/pages/fleet_page.dart';
 import 'features/telemetry_ingest/presentation/bindings/ingest_binding.dart';
+import 'features/trips/presentation/bindings/trips_binding.dart';
 import 'features/vehicle_detail/presentation/bindings/vehicle_detail_binding.dart';
 
 /// Opens the database and builds the object graph before the first frame.
@@ -18,6 +20,7 @@ import 'features/vehicle_detail/presentation/bindings/vehicle_detail_binding.dar
 /// both async, and a screen that builds before its writer exists would have to
 /// carry a "not ready yet" state that never means anything useful.
 Future<void> main() async {
+  coldStart.start();
   WidgetsFlutterBinding.ensureInitialized();
 
   final db = await FleetDb.open(await databasePath());
@@ -28,6 +31,7 @@ Future<void> main() async {
   await IngestBinding(db: db).dependenciesAsync();
   AlertsBinding(db: db).dependencies();
   GeofenceBinding(db: db).dependencies();
+  TripsBinding(db: db).dependencies();
   FleetBinding(db: db).dependencies();
   VehicleDetailBinding(db: db).dependencies();
 

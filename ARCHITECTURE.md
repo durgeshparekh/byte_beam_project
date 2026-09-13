@@ -397,6 +397,8 @@ The same table answers the UI's two questions — which fence a truck is in, and
 
 ### 7.2 Trips
 
+Built, as `lib/db/trip_sql.dart`. See [docs/06-trips.md](docs/06-trips.md).
+
 A nested fence must not manufacture a trip: leaving a bay while still inside the depot is not a departure. So trips key off **containment count**, not individual fences:
 
 ```sql
@@ -415,13 +417,25 @@ FROM geofence_transition
 
 **Idempotency.** `trip_id = hash(vehicle_id, start_ts)`, so a duplicate packet regenerates the identical row. A late packet that moves a boundary is handled by the replay in §4 step 4 — delete derived rows at or after `t0`, re-derive — with the deterministic id as the backstop, not the mechanism.
 
+**Two things the build changed.** The incremental seed above was not built, and deliberately: `geofence_transition` holds a handful of rows per truck per day where `location_fix` holds thousands, so the resume machinery that earns its place in §7.1 would buy nothing here and would add a seam that can disagree with itself. Trips are deleted and rebuilt for the **whole vehicle**, from its whole crossing log, for every vehicle a batch touched. Duplicates, late packets and fence edits then need no handling at all — they are already handled one layer down, in the crossings.
+
+The seed is still needed, just not as a table. The detector emits no transition for the zone it establishes on a cold start, so a truck that was already inside the depot has an EXIT with no matching ENTRY, and a count starting at zero would go to −1 and lose the trip. The count before the first crossing is recovered arithmetically as *inside now, minus the net of every crossing since* — exact, and one scalar subquery rather than a history.
+
+Simultaneous crossings are collapsed per event time before the running sum, because leaving a bay and the depot around it can be confirmed off one fix and a sum stepping through them one at a time dips through a spurious zero. Among crossings sharing an instant the fence named is the largest: a truck that leaves Bay 3 and Whitefield Depot together departed from the depot.
+
 ---
 
 ## 8. Scale
 
-**Backfill.** 500 vehicles × 6 signals × ~700 ticks ≈ 2.1 M rows, generated **inside DuckDB** with `range()` and `random()` in a single `INSERT … SELECT`. Generating rows in Dart and pushing them across the FFI boundary would take minutes; this takes seconds. The table is created without the primary key, bulk-loaded, then `CREATE UNIQUE INDEX` once — building the ART index in one pass instead of 2 M times.
+Built. Measured numbers, method and device are in
+[docs/07-scale.md](docs/07-scale.md); this section is the plan they were taken
+against, with the two places the plan turned out to be wrong marked.
 
-**Measurements to report**, on a named physical device plus a named emulator:
+**Backfill.** 500 vehicles × 6 signals × ~700 ticks ≈ 2.1 M rows, generated **inside DuckDB** with `range()` in a single `INSERT … SELECT`. Generating rows in Dart and pushing them across the FFI boundary would take minutes; this takes seconds. Deterministic expressions rather than `random()` in the end, so re-running the backfill inserts nothing and the fleet list fills with plausible numbers instead of noise.
+
+**Wrong, and measured:** the plan said the table would be created without its primary key, bulk-loaded, then indexed once. The trick is real — 606 ms against 2467 ms for the same 2.1 M rows on this machine, four times faster — but it cannot be applied, because `signal_reading` is created with its primary key in migration v1 and DuckDB 1.2.1 answers `ALTER TABLE … DROP CONSTRAINT` with "No support for that ALTER TABLE option yet". Forking the schema for a debug action is not worth 3.7 seconds, so the backfill keeps the constraint and pays for it.
+
+**Measurements to report.** Taken on a MacBook Pro (M1 Pro, 16 GB, macOS 26.6.2) in release: cold start **1.3–1.5 s**, fleet query warm **p50 10.1 ms / p95 12.5 ms**, memory at rest **234 MB**. All three inside target, on a desktop — there is no `ios/` directory in this project and no Android AVD on the machine, so a phone number is missing and said to be missing. The plan:
 
 | Metric | How | Target |
 |---|---|---|
@@ -438,6 +452,8 @@ If a number is bad it gets reported as bad, with a diagnosis. The two I already 
 
 - `signal_reading` keeps 7 days at full resolution.
 - Older data is downsampled into 5-minute buckets per `(vehicle, signal)` — min/max/avg/last — and the raw rows are dropped, followed by `CHECKPOINT`.
+- **Wrong, and measured:** a bucket holding a *single* reading must be left alone. The first implementation rolled every old reading up regardless, and on a log sparser than the bucket width that turned 1 050 000 readings into 1 050 000 rows carrying four more columns each — the database grew by 126 MiB. Built as `HAVING count(*) > 1`.
+- DuckDB reuses freed blocks rather than returning them to the OS, so the *file* never shrinks. The number that moves is bytes in use, and both are reported.
 - Derived tables (transitions, trips, alerts) are small and kept indefinitely.
 - **What is lost:** sub-5-minute shape of old data, and the ability to *recompute* geofence transitions outside the hot window. Trip replay is therefore bounded to 7 days; a late packet older than that is rejected and counted, not silently applied.
 
@@ -490,6 +506,7 @@ The brief says the data model has genuinely ambiguous cases. These are the ones 
 | 14 | Which freshness window does the status ladder use? | The **vehicle-level 10-minute** window that decides OFFLINE, because status is a vehicle-level claim. The alert badge and the detail-screen verdict pills keep the **per-signal** `signal_spec.max_age_sec`, because a threshold is a claim about one signal. | One window for everything. Scoring the ladder against the 5-minute signal window leaves a dead band between 5 and 10 minutes where an online, visibly moving truck reads STOPPED — caught by a test, not by reasoning. |
 | 15 | A reading oscillating across a threshold | Resolution needs the value back inside by a **hysteresis band** of 2 (points of SOC, degrees of battery temperature); severity within an open episode moves on the bare thresholds. Found by measurement, not reasoning: a real run produced seven overheat episodes on one truck in 114 seconds. | Bare `value > threshold` for both raising and resolving — makes `raised_at` a lie and the episode record useless. |
 | 13 | GPS jitter on the boundary | 25 m (or accuracy, whichever larger) hysteresis band plus two-fix confirmation; band fixes carry the previous zone forward. | Bare `d < r` — flaps a parked truck into dozens of trips. |
+| 16 | Fence deactivated while a vehicle is inside it | Containment keeps the last zone it was confirmed in, so that vehicle's count never returns to zero and it starts no further trips. Same principle as ambiguity 6 — an episode ends when we watch it end — and here the principle costs something real. Recorded rather than fixed: every alternative invents a fact. | An implicit exit at `active_to` (manufactures a departure out of a fence edit) or excluding deactivated fences from derivation (retroactively deletes the trips that named them, which is exactly what keeping deactivated fences was for). |
 
 ---
 

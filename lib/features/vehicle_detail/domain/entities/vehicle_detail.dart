@@ -1,5 +1,6 @@
 import '../../../fleet/domain/entities/vehicle_status.dart';
 import '../../../geofence/domain/entities/geofence.dart';
+import '../../../trips/domain/entities/trip.dart';
 import 'signal_reading_row.dart';
 import 'soc_history.dart';
 
@@ -13,6 +14,7 @@ class VehicleDetail {
     required this.readings,
     required this.history,
     required this.visits,
+    required this.trips,
     this.lastPing,
     this.currentGeofence,
   });
@@ -47,4 +49,11 @@ class VehicleDetail {
   /// Recent crossings, newest first. The visible evidence that the detector
   /// runs at all; the containment above is only its latest conclusion.
   final List<GeofenceVisit> visits;
+
+  /// Recent legs, newest first, running one at the top when there is one.
+  ///
+  /// A second reading of the same crossings the panel above lists — trips are
+  /// derived from `geofence_transition` and nothing else — so the two sections
+  /// are a free consistency check on each other.
+  final List<Trip> trips;
 }

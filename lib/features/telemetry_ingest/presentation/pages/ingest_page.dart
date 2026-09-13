@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 
+import '../../../scale/presentation/pages/scale_page.dart';
 import '../controllers/ingest_controller.dart';
 
 /// Ingest monitor.
@@ -19,6 +20,11 @@ class IngestPage extends GetView<IngestController> {
       appBar: AppBar(
         title: const Text('Telemetry ingest'),
         actions: [
+          IconButton(
+            tooltip: 'Scale exercise',
+            icon: const Icon(Icons.speed_outlined),
+            onPressed: () => Get.to(() => const ScalePage()),
+          ),
           Obx(
             () => IconButton(
               tooltip: controller.isRunning.value ? 'Stop feed' : 'Start feed',

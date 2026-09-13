@@ -14,6 +14,7 @@ import '../../domain/usecases/get_ingest_snapshot.dart';
 import '../../domain/usecases/ingest_packet_batch.dart';
 import '../../domain/usecases/observe_telemetry.dart';
 import '../../domain/usecases/seed_fleet.dart';
+import '../../../scale/presentation/controllers/scale_controller.dart';
 import '../controllers/ingest_controller.dart';
 
 /// Wires the feature together.
@@ -62,6 +63,20 @@ class IngestBinding extends Bindings {
         getIngestSnapshot: GetIngestSnapshot(repository),
         roster: source.fleet,
         pulse: Get.find<DatabasePulse>(),
+      ),
+      permanent: true,
+    );
+
+    // The scale exercise's debug actions. Registered by this binding because
+    // it owns both the writer they run through and the feed they have to stop
+    // first, and permanent because the cold start it reports is a property of
+    // the launch rather than of the screen.
+    Get.put(
+      ScaleController(
+        writer: local.writer,
+        pulse: Get.find<DatabasePulse>(),
+        clock: clock,
+        pauseFeed: controller.stop,
       ),
       permanent: true,
     );

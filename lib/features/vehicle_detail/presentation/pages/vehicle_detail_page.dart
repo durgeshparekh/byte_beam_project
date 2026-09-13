@@ -7,6 +7,7 @@ import '../../../alerts/presentation/pages/alerts_page.dart';
 import '../../../alerts/presentation/widgets/alert_card.dart';
 import '../../../fleet/presentation/widgets/status_chip.dart';
 import '../../../geofence/presentation/widgets/zone_panel.dart';
+import '../../../trips/presentation/widgets/trip_tile.dart';
 import '../controllers/vehicle_detail_controller.dart';
 import '../widgets/reading_row_tile.dart';
 import '../widgets/soc_sparkline.dart';
@@ -85,6 +86,21 @@ class _VehicleDetailPageState extends State<VehicleDetailPage> {
               visits: detail.visits,
               now: now,
             ),
+            _SectionTitle(
+              title: 'Trips',
+              subtitle: 'Derived from those crossings, not reported',
+            ),
+            if (detail.trips.isEmpty)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  'No trips yet — this vehicle has not left every geofence '
+                  'it was inside.',
+                ),
+              )
+            else
+              for (final trip in detail.trips)
+                TripTile(trip: trip, now: now, showVehicle: false),
             _SectionTitle(
               title: 'Readings',
               subtitle: 'Each signal ages on its own clock',

@@ -6,7 +6,7 @@ library;
 /// Forward-only. Append a new entry; never edit a shipped one.
 /// See ARCHITECTURE.md §3.5 — class D tables are dropped and rebuilt rather
 /// than migrated, so most schema changes add nothing here.
-const List<String> migrations = [_v1, _v2];
+const List<String> migrations = [_v1, _v2, _v3];
 
 const _v1 = r'''
 -- ---------------------------------------------------------------- class R --
@@ -166,4 +166,31 @@ INSERT INTO geofence VALUES
    TIMESTAMP '2000-01-01', NULL, TIMESTAMP '2000-01-01'),
   ('gf-hebbal', 'Hebbal Yard',          13.0200, 77.6500, 1500,
    TIMESTAMP '2000-01-01', NULL, TIMESTAMP '2000-01-01');
+''';
+
+/// Retention: the bucket table old readings are compacted into.
+///
+/// A third migration rather than an edit to [_v2], for the same reason [_v2]
+/// was not an edit to [_v1] — forward-only means forward-only, and a database
+/// that already exists has to upgrade rather than reset.
+const _v3 = r'''
+-- ---------------------------------------------------------------- class D --
+-- Five-minute summaries of readings older than the hot window, written as the
+-- raw rows are dropped. Derived like everything else in class D, but derived
+-- from data that no longer exists — which makes it the one class D table that
+-- cannot be rebuilt, and the reason §8 spells out what is lost.
+--
+-- min/max as well as avg because an average hides exactly the thing anyone
+-- looks at old battery data for: how hot did it actually get.
+CREATE TABLE signal_rollup (
+  vehicle_id TEXT      NOT NULL,
+  signal     TEXT      NOT NULL,
+  bucket_ts  TIMESTAMP NOT NULL,
+  readings   BIGINT    NOT NULL,
+  min_value  DOUBLE    NOT NULL,
+  max_value  DOUBLE    NOT NULL,
+  avg_value  DOUBLE    NOT NULL,
+  last_value DOUBLE    NOT NULL,
+  PRIMARY KEY (vehicle_id, signal, bucket_ts)
+);
 ''';

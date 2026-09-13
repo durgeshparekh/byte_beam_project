@@ -42,10 +42,7 @@ class DuckDbFleetLocalDataSource implements FleetLocalDataSource {
 
   /// Count per status, plus the total for the "All" chip.
   Future<Map<FleetFilter, int>> _counts(DateTime now) async {
-    final result = await _query(
-      '$scoredCte SELECT status, count(*) FROM scored GROUP BY status',
-      now,
-    );
+    final result = await _query(fleetCountsQuery, now);
 
     final counts = {for (final filter in FleetFilter.values) filter: 0};
     var total = 0;
@@ -59,19 +56,14 @@ class DuckDbFleetLocalDataSource implements FleetLocalDataSource {
     return counts;
   }
 
-  /// The rows for one chip, ordered by registration so the list is stable
-  /// between refreshes — an order that jumps as speeds change is unreadable.
+  /// The rows for one chip.
   Future<List<FleetVehicleSummaryModel>> _vehicles(
     FleetFilter filter,
     DateTime now,
   ) async {
     final status = filter.status;
     final where = status == null ? '' : "WHERE status = '${status.sqlName}'";
-    final result = await _query(
-      '$scoredCte SELECT vehicle_id, reg_no, model, status, soc, range_km, '
-      'speed, last_ping, alert_severity FROM scored $where ORDER BY reg_no',
-      now,
-    );
+    final result = await _query(fleetRowsQuery(where), now);
     return [
       for (final row in result.fetchAll())
         FleetVehicleSummaryModel.fromRow(row),

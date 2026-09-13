@@ -5,6 +5,7 @@ import 'package:byte_beam_project/features/alerts/presentation/widgets/alert_car
 import 'package:byte_beam_project/features/fleet/domain/entities/vehicle_status.dart';
 import 'package:byte_beam_project/features/geofence/domain/entities/geofence.dart';
 import 'package:byte_beam_project/features/fleet/presentation/widgets/status_chip.dart';
+import 'package:byte_beam_project/features/trips/domain/entities/trip.dart';
 import 'package:byte_beam_project/features/vehicle_detail/domain/entities/reading_verdict.dart';
 import 'package:byte_beam_project/features/vehicle_detail/domain/entities/signal_reading_row.dart';
 import 'package:byte_beam_project/features/vehicle_detail/domain/entities/soc_history.dart';
@@ -57,6 +58,7 @@ VehicleDetail detailWith({
   SocHistory history = const SocHistory.empty(),
   String? currentGeofence,
   List<GeofenceVisit> visits = const [],
+  List<Trip> trips = const [],
 }) {
   return VehicleDetail(
     vehicleId: 'v1',
@@ -65,6 +67,7 @@ VehicleDetail detailWith({
     status: VehicleStatus.idle,
     currentGeofence: currentGeofence,
     visits: visits,
+    trips: trips,
     readings: readings,
     history: history,
     lastPing: now.subtract(const Duration(minutes: 2)),
@@ -315,6 +318,39 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  // The trips section and the zone panel above it are two readings of the same
+  // crossings, which is why they sit on one screen: if they ever disagree the
+  // detector has a bug.
+  testWidgets('the trips section lists this vehicle legs', (tester) async {
+    await pump(
+      tester,
+      detailWith(
+        trips: [
+          Trip(
+            tripId: 'v1|1',
+            vehicleId: 'v1',
+            regNo: 'KA01AB1234',
+            origin: 'Whitefield Depot',
+            destination: 'Hebbal Yard',
+            startedAt: now.subtract(const Duration(hours: 3)),
+            endedAt: now.subtract(const Duration(hours: 2)),
+            distanceKm: 18.4,
+            isConfident: true,
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('Whitefield Depot → Hebbal Yard'), findsOneWidget);
+    expect(find.textContaining('18.4 km'), findsOneWidget);
+  });
+
+  testWidgets('a vehicle that has never left says so', (tester) async {
+    await pump(tester, detailWith());
+
+    expect(find.textContaining('has not left every geofence'), findsOneWidget);
   });
 
   testWidgets("the vehicle's own alerts sit above the register", (

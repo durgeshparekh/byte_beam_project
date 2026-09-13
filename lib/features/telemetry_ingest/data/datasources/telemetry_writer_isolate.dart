@@ -4,8 +4,12 @@ import 'package:dart_duckdb/dart_duckdb.dart';
 
 import '../../../../core/error/exceptions.dart';
 import '../../../../db/alert_sql.dart';
+import '../../../../db/backfill_sql.dart';
 import '../../../../db/fleet_db.dart';
 import '../../../../db/geofence_sql.dart';
+import '../../../../db/retention_sql.dart';
+import '../../../../db/trip_sql.dart';
+import '../../../../db/vehicle_status_sql.dart';
 import '../models/telemetry_packet_model.dart';
 
 /// The single writer.
@@ -138,6 +142,54 @@ class TelemetryWriter {
     }
   }
 
+  /// Generates the scale exercise's fleet and log (§8).
+  ///
+  /// A debug action, exposed here because the writer is the only connection
+  /// allowed to write and because generating two million rows on the UI
+  /// isolate would freeze the app for as long as it took.
+  Future<Map<String, int>> backfill({
+    required DateTime now,
+    int vehicles = 500,
+    int ticks = 700,
+  }) async =>
+      (await _tool(_Tool.backfill, now, {
+            'vehicles': vehicles,
+            'ticks': ticks,
+          }))!
+          as Map<String, int>;
+
+  /// Applies the retention policy: summarise, drop, checkpoint.
+  Future<Map<String, int>> compact({
+    required DateTime now,
+    int keepMinutes = 7 * 24 * 60,
+  }) async =>
+      (await _tool(_Tool.compact, now, {'keep_minutes': keepMinutes}))!
+          as Map<String, int>;
+
+  /// Times [runs] fleet-list refreshes and returns each one in microseconds.
+  ///
+  /// Run here rather than on the UI isolate deliberately: the numbers are
+  /// meant to be the database's, not the frame scheduler's, and a query timed
+  /// between two builds measures both.
+  Future<List<int>> benchFleetQuery({
+    required DateTime now,
+    int runs = 100,
+  }) async => (await _tool(_Tool.bench, now, {'runs': runs}))! as List<int>;
+
+  /// Sends one maintenance command and waits for its numbers.
+  Future<Object?> _tool(_Tool tool, DateTime now, Map<String, int> args) async {
+    final reply = ReceivePort();
+    _commands.send(_ToolRequest(reply.sendPort, tool, now, args));
+    final response = await reply.first as _WriteResponse;
+    reply.close();
+
+    final error = response.error;
+    if (error != null) {
+      throw LocalDatabaseException('${tool.name} failed', error);
+    }
+    return response.payload;
+  }
+
   /// Closes the writer's connection and stops the isolate.
   Future<void> dispose() async {
     final reply = ReceivePort();
@@ -173,6 +225,16 @@ Future<void> _writerMain(_WriterBoot boot) async {
       commands.close();
       message.reply.send(null);
       return;
+    }
+    if (message is _ToolRequest) {
+      try {
+        message.reply.send(
+          _WriteResponse(payload: await _runTool(conn, message)),
+        );
+      } catch (error) {
+        message.reply.send(_WriteResponse(error: error.toString()));
+      }
+      continue;
     }
     if (message is _GeofenceRequest) {
       try {
@@ -297,9 +359,11 @@ Future<IngestReceiptModel> _applyBatch(
     lateVehicles = await _countLateVehicles(conn);
     await evaluateAlerts(conn, now);
     await _deriveGeofences(conn);
-    // Trips slot in beside the geofence detector, still before the watermark
-    // moves. Order matters: the detector reads the *previous* watermark to
-    // decide which vehicles have gone backwards and need a full replay.
+    await deriveTrips(conn);
+    // All of it before the watermark moves. Order matters twice over: the
+    // detector reads the *previous* watermark to decide which vehicles have
+    // gone backwards and need a full replay, and trips read the containment
+    // that same detector has just rewritten.
     await _advanceWatermark(conn);
     await conn.execute('COMMIT');
   } catch (_) {
@@ -428,11 +492,88 @@ Future<void> _saveGeofence(Connection conn, List<Object?> row) async {
   try {
     await execPrepared(conn, upsertGeofence, row);
     await recomputeAllGeofences(conn);
+    // Moving a fence moves the crossings every trip built on it was read from.
+    await deriveTrips(conn);
     await conn.execute('COMMIT');
   } catch (_) {
     await conn.execute('ROLLBACK');
     rethrow;
   }
+}
+
+/// Runs one maintenance command.
+///
+/// The three share a message class rather than getting one each: they are
+/// debug actions with the same shape — take some numbers, do a long thing,
+/// give some numbers back — and three near-identical classes would be more
+/// code than the feature.
+Future<Object?> _runTool(Connection conn, _ToolRequest request) async {
+  switch (request.tool) {
+    case _Tool.backfill:
+      // One transaction: a half-loaded log with derived state built on top of
+      // it is worse than no log at all, and this is the one write in the app
+      // large enough for the distinction to be visible.
+      await conn.execute('BEGIN TRANSACTION');
+      try {
+        final result = await backfillFleet(
+          conn,
+          now: request.now,
+          vehicles: request.args['vehicles']!,
+          ticks: request.args['ticks']!,
+        );
+        await conn.execute('COMMIT');
+        return result;
+      } catch (_) {
+        await conn.execute('ROLLBACK');
+        rethrow;
+      }
+    case _Tool.compact:
+      // Manages its own transaction — see [compactSignalLog], which has to
+      // leave the CHECKPOINT outside one.
+      return compactSignalLog(
+        conn,
+        now: request.now,
+        keep: Duration(minutes: request.args['keep_minutes']!),
+      );
+    case _Tool.bench:
+      return _benchFleetQuery(conn, request.now, request.args['runs']!);
+  }
+}
+
+/// Times the two statements one fleet-list refresh runs, [runs] times.
+///
+/// Warm, as §8 specifies: the first few passes are thrown away so the number
+/// is the steady-state cost rather than the cost of loading the index off
+/// disk. Rows are fetched, not just planned — a query whose results are never
+/// read is a query that has not finished.
+Future<List<int>> _benchFleetQuery(
+  Connection conn,
+  DateTime now,
+  int runs,
+) async {
+  Future<void> once() async {
+    for (final sql in [fleetCountsQuery, fleetRowsQuery()]) {
+      final statement = await conn.prepare(sql);
+      try {
+        statement.bindParams([now]);
+        (await statement.execute()).fetchAll();
+      } finally {
+        await statement.dispose();
+      }
+    }
+  }
+
+  for (var i = 0; i < 3; i++) {
+    await once();
+  }
+
+  final timings = <int>[];
+  for (var i = 0; i < runs; i++) {
+    final stopwatch = Stopwatch()..start();
+    await once();
+    timings.add(stopwatch.elapsedMicroseconds);
+  }
+  return timings;
 }
 
 /// Applies one dismissal or one undo.
@@ -561,14 +702,32 @@ class _AlertRequest {
       _AlertRequest(alertId: alertId, at: at, reason: reason, reply: port);
 }
 
+/// Which maintenance command a [_ToolRequest] carries.
+enum _Tool { backfill, compact, bench }
+
+/// One maintenance command: what to do, against when, with what numbers.
+class _ToolRequest {
+  const _ToolRequest(this.reply, this.tool, this.now, this.args);
+
+  final SendPort reply;
+  final _Tool tool;
+  final DateTime now;
+  final Map<String, int> args;
+}
+
 /// Either a receipt or the error string that replaced it.
 class _WriteResponse {
-  const _WriteResponse({this.receipt, this.inserted, this.error});
+  const _WriteResponse({this.receipt, this.inserted, this.payload, this.error});
 
   final IngestReceiptModel? receipt;
 
   /// Row count, for requests that insert rather than ingest.
   final int? inserted;
+
+  /// Whatever a [_ToolRequest] produced — counts, or a list of timings.
+  /// Untyped because the three commands return different shapes and this is a
+  /// debug path; the public methods on [TelemetryWriter] put the types back.
+  final Object? payload;
 
   final String? error;
 }
