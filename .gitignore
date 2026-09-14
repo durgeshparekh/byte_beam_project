@@ -85,6 +85,7 @@ key.properties
 DerivedData/
 
 # Embedded DuckDB / Local databases & WAL files
+*.zip
 # host duckdb library for `flutter test` (tool/fetch_duckdb_lib.sh)
 .duckdb/
 $DB*
