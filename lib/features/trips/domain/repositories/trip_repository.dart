@@ -6,8 +6,9 @@ import '../entities/trip.dart';
 /// the truck went.
 abstract class TripRepository {
   /// The fleet's most recent trips, running ones first.
+  ///
+  /// The only read here. Vehicle detail shows one truck's legs, but it reads
+  /// them through its own data source so the whole screen comes off one
+  /// snapshot — see `_trips` there.
   Future<Result<List<Trip>>> recent({int limit});
-
-  /// One vehicle's most recent trips, newest first.
-  Future<Result<List<Trip>>> forVehicle(String vehicleId, {int limit});
 }

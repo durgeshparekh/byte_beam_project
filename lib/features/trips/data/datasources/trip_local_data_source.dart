@@ -10,9 +10,6 @@ import '../models/trip_model.dart';
 abstract class TripLocalDataSource {
   /// The fleet's most recent trips, running ones first.
   Future<List<Trip>> recent(int limit);
-
-  /// One vehicle's most recent trips, newest first.
-  Future<List<Trip>> forVehicle(String vehicleId, int limit);
 }
 
 /// DuckDB implementation, on the UI isolate's own read connection.
@@ -28,22 +25,6 @@ class DuckDbTripLocalDataSource implements TripLocalDataSource {
       return [for (final row in result.fetchAll()) TripModel.fromRow(row)];
     } catch (error) {
       throw LocalDatabaseException('trip list query failed', error);
-    }
-  }
-
-  @override
-  Future<List<Trip>> forVehicle(String vehicleId, int limit) async {
-    try {
-      final statement = await _read.prepare(vehicleTripsQuery(limit));
-      try {
-        statement.bindParams([vehicleId]);
-        final result = await statement.execute();
-        return [for (final row in result.fetchAll()) TripModel.fromRow(row)];
-      } finally {
-        await statement.dispose();
-      }
-    } catch (error) {
-      throw LocalDatabaseException('vehicle trip query failed', error);
     }
   }
 }

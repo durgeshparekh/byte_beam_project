@@ -67,7 +67,7 @@ class ScalePage extends GetView<ScaleController> {
               subtitle:
                   '${ScaleController.vehicles} vehicles x '
                   '${ScaleController.ticks} reports x 6 signals, generated '
-                  'inside DuckDB and spread over seven days',
+                  'inside DuckDB at a ten-second cadence',
               button: 'Backfill',
               onPressed: controller.isBusy.value ? null : controller.backfill,
               rows: controller.backfillResult,
@@ -88,7 +88,7 @@ class ScalePage extends GetView<ScaleController> {
             _Action(
               title: 'Retention',
               subtitle:
-                  'Readings older than seven days summarised into five-minute '
+                  'Readings past the window below summarised into five-minute '
                   'buckets, raw rows dropped, then CHECKPOINT',
               button: 'Compact',
               onPressed: controller.isBusy.value ? null : controller.compact,

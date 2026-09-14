@@ -28,15 +28,6 @@ class StubTripRepository implements TripRepository {
     if (failWith case final message?) return Err(DatabaseFailure(message));
     return Ok(trips);
   }
-
-  @override
-  Future<Result<List<Trip>>> forVehicle(
-    String vehicleId, {
-    int limit = 100,
-  }) async {
-    if (failWith case final message?) return Err(DatabaseFailure(message));
-    return Ok(trips.where((trip) => trip.vehicleId == vehicleId).toList());
-  }
 }
 
 /// Registers a real controller over [repository].

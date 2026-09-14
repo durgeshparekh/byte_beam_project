@@ -19,16 +19,4 @@ class TripRepositoryImpl implements TripRepository {
       return Err(DatabaseFailure(error.message));
     }
   }
-
-  @override
-  Future<Result<List<Trip>>> forVehicle(
-    String vehicleId, {
-    int limit = 100,
-  }) async {
-    try {
-      return Ok(await _local.forVehicle(vehicleId, limit));
-    } on LocalDatabaseException catch (error) {
-      return Err(DatabaseFailure(error.message));
-    }
-  }
 }

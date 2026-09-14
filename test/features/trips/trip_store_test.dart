@@ -5,6 +5,7 @@ import 'package:byte_beam_project/features/telemetry_ingest/domain/entities/flee
 import 'package:byte_beam_project/features/telemetry_ingest/domain/entities/telemetry_packet.dart';
 import 'package:byte_beam_project/features/trips/data/datasources/trip_local_data_source.dart';
 import 'package:byte_beam_project/features/trips/domain/entities/trip.dart';
+import 'package:byte_beam_project/features/vehicle_detail/data/datasources/vehicle_detail_local_data_source.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../duckdb_support.dart';
@@ -139,9 +140,13 @@ void main() {
     await startAtDepot();
     await driveTo(2, 3000);
 
-    expect(
-      (await trips.forVehicle('v1', 50)).single.tripId,
-      (await all()).single.tripId,
-    );
+    // Vehicle detail runs `vehicleTripsQuery` on its own connection so the
+    // whole screen comes off one snapshot. Two spellings of "this truck's
+    // legs" is exactly how two screens start disagreeing, so pin them equal.
+    final detail = await DuckDbVehicleDetailLocalDataSource(
+      db.read,
+    ).detail('v1', at(10));
+
+    expect(detail!.trips.single.tripId, (await all()).single.tripId);
   });
 }

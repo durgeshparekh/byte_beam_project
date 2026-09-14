@@ -36,17 +36,12 @@ class ScaleController extends GetxController {
   final DatabasePulse _pulse;
   final Clock _clock;
 
-  /// Stops the simulator feed.
-  ///
-  /// Every action here pauses it first. A benchmark with a live feed writing
-  /// underneath measures the feed as well as the query, and a two-million-row
-  /// transaction with batches queueing behind it measures the queue.
-
   /// How many vehicles and reports each the backfill generates.
   ///
   /// 500 × 700 × 6 signals is 2.1 M rows, which is the brief's floor with a
-  /// little over. Spread across seven days, so the retention horizon below has
-  /// something on both sides of it.
+  /// little over. At the backfill's ten-second cadence that is about two hours
+  /// of dense history — dense rather than long on purpose, because a log
+  /// sparser than the rollup bucket compacts nothing.
   static const vehicles = 500;
   static const ticks = 700;
 
@@ -81,6 +76,11 @@ class ScaleController extends GetxController {
   /// Last error, or empty.
   final error = ''.obs;
 
+  /// Stops the simulator feed.
+  ///
+  /// Every action here pauses it first. A benchmark with a live feed writing
+  /// underneath measures the feed as well as the query, and a two-million-row
+  /// transaction with batches queueing behind it measures the queue.
   final Future<void> Function() _pauseFeed;
 
   /// Cold start to the first painted fleet list, or null if that has not

@@ -153,18 +153,30 @@ Future<(int, int)> _databaseUse(Connection conn) async {
 /// Turns DuckDB's human-readable size into bytes.
 ///
 /// The pragma returns text — "0 bytes", "12.3 MiB" — so this reads the number
-/// and the one letter that scales it. An unrecognised unit reports 0 rather
-/// than a wrong number, because a size that is silently off by 1024 is worse
-/// than one that is obviously missing.
+/// and the one letter that scales it. Every unit the pattern matches is in
+/// [_scale], and anything it does not match reports 0 rather than a wrong
+/// number: a size silently off by 1024 is worse than one obviously missing.
 int _bytesOf(Object? value) {
   if (value is num) return value.toInt();
-  final match = RegExp(
-    r'^([\d.]+)\s*([KMGT]?)',
-  ).firstMatch(value.toString().trim());
+  final match = _size.firstMatch(value.toString().trim());
   if (match == null) return 0;
-  const scale = {'': 1, 'K': 1024, 'M': 1048576, 'G': 1073741824};
-  return (double.parse(match.group(1)!) * scale[match.group(2)]!).round();
+  return (double.parse(match.group(1)!) * _scale[match.group(2)]!).round();
 }
+
+/// The multiplier for each unit letter [_bytesOf] understands.
+const _scale = <String, int>{
+  '': 1,
+  'K': 1024,
+  'M': 1048576,
+  'G': 1073741824,
+  'T': 1099511627776,
+};
+
+/// Built **from** [_scale], so the letters the pattern accepts and the letters
+/// that have a multiplier cannot drift apart. Spelling the class out by hand
+/// is how a `T` the pattern matched met a map that stopped at `G`, and turned
+/// a large database into a null-check crash instead of a number.
+final _size = RegExp(r'^([\d.]+)\s*([' + _scale.keys.join() + r']?)');
 
 /// Runs a mutating statement and returns the row count DuckDB reports.
 Future<int> _countOf(Connection conn, String sql) async {

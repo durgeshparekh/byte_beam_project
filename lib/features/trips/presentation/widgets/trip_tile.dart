@@ -73,7 +73,10 @@ class TripTile extends StatelessWidget {
             '${trip.distanceKm!.toStringAsFixed(1)} km'
           else
             'distance unknown',
-          '${formatAge(now.difference(trip.startedAt))} ago',
+          // Only once the leg is over. For a running trip "started 2h ago" and
+          // "running 2h" are the same number, and a row that says it twice
+          // reads as though one of them means something else.
+          if (!running) '${formatAge(now.difference(trip.startedAt))} ago',
         ].join(' · '),
         style: theme.textTheme.bodySmall,
       ),
