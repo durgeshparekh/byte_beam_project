@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Export raw Claude Code session transcripts to ai-logs/*.md (deliverable 3).
+# Export raw Claude Code session transcripts to ai-logs/*.md (deliverable 3),
+# plus the git history to ai-logs/git-log.md.
 # Uncurated: user turns, assistant turns, tool calls and tool results verbatim.
 #
 #   tool/export_ai_logs.sh                      # sessions run from this project
@@ -32,12 +33,37 @@ fi
 [ ${#SRCS[@]} -eq 0 ] && { echo "no transcript directories found"; exit 1; }
 
 mkdir -p ai-logs
+# Git history next to the transcripts, oldest first, so each commit can be read
+# against the conversation that produced it. Written before the transcript step
+# because that step exits non-zero when it refuses a session.
+{
+  echo "# Git log"
+  echo
+  echo '```'
+  git log --reverse --date=iso --stat
+  echo '```'
+} > ai-logs/git-log.md
+echo "ai-logs/git-log.md"
 python3 - "$MATCH" "${SRCS[@]}" <<'PY'
-import json, sys, pathlib
+import json, re, sys, pathlib
 
 match, srcs = sys.argv[1], [pathlib.Path(p) for p in sys.argv[2:]]
 out = pathlib.Path("ai-logs")
 CAP = 4000  # tool results are truncated; everything else is verbatim
+
+# The logs are committed and shared, and tool results are copied verbatim, so a
+# credential that ever reached a terminal would be published. Fail closed: a
+# session containing one of these is not written at all. Not curation — nothing
+# is removed silently; the operator redacts the source and re-runs.
+SECRETS = re.compile("|".join([
+    r"sk-ant-[A-Za-z0-9_-]{20,}",                      # Anthropic
+    r"sk-(?:proj-)?[A-Za-z0-9_-]{32,}",                # OpenAI
+    r"gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,}",
+    r"AKIA[0-9A-Z]{16}",                               # AWS access key id
+    r"AIza[0-9A-Za-z_-]{35}",                          # Google API key
+    r"xox[abprs]-[A-Za-z0-9-]{10,}",                   # Slack
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+]))
 
 def blocks(content):
     """Yields (kind, text) for each renderable block of a message."""
@@ -57,7 +83,7 @@ def blocks(content):
             c = c if isinstance(c, str) else json.dumps(c, indent=2)
             yield "result", c[:CAP] + ("\n… truncated" if len(c) > CAP else "")
 
-written = 0
+written = blocked = 0
 for src in srcs:
     for f in sorted(src.glob("*.jsonl")):
         raw_text = f.read_text(errors="replace")
@@ -86,10 +112,17 @@ for src in srcs:
                     lines.append(f"**{kind}**\n```\n{text}\n```\n")
         if not lines:
             continue
+        body = f"# Session {f.stem}\n_{first}_\n" + "".join(lines)
+        hits = sorted({m.group(0)[:12] + "…" for m in SECRETS.finditer(body)})
+        if hits:
+            print(f"refusing {f.name}: possible secrets {hits}", file=sys.stderr)
+            blocked += 1
+            continue
         dest = out / f"{first[:10]}-{f.stem[:8]}.md"
-        dest.write_text(f"# Session {f.stem}\n_{first}_\n" + "".join(lines))
+        dest.write_text(body)
         print(dest)
         written += 1
 
 print(f"{written} session(s) exported", file=sys.stderr)
+sys.exit(1 if blocked else 0)
 PY

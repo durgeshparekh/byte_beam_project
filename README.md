@@ -96,7 +96,8 @@ creating and reopening its database in Application Support.
 ## AI conversation logs
 
 Deliverable 3, uncurated, in [`ai-logs/`](ai-logs) — full turns, tool calls and
-tool results, dead ends included. Regenerate after a session:
+tool results, dead ends included, with the commit history beside them in
+[`ai-logs/git-log.md`](ai-logs/git-log.md). Regenerate after a session:
 
 ```bash
 tool/export_ai_logs.sh
