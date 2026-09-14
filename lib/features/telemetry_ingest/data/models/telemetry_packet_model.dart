@@ -53,6 +53,7 @@ class IngestReceiptModel extends IngestReceipt {
     required super.locationRowsOffered,
     required super.locationRowsApplied,
     required super.lateVehicles,
+    super.orphanRows,
     required super.duration,
   });
 }

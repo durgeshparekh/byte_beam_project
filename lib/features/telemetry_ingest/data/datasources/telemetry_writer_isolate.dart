@@ -335,6 +335,7 @@ Future<IngestReceiptModel> _applyBatch(
   final stopwatch = Stopwatch()..start();
 
   await _stage(conn, batch);
+  final orphanRows = await _dropOrphans(conn);
 
   // Transaction 1 — the log and the latest-value table.
   await conn.execute('BEGIN TRANSACTION');
@@ -379,6 +380,7 @@ Future<IngestReceiptModel> _applyBatch(
     locationRowsOffered: offered.$2,
     locationRowsApplied: locationsApplied,
     lateVehicles: lateVehicles,
+    orphanRows: orphanRows,
     duration: stopwatch.elapsed,
   );
 }
@@ -416,6 +418,28 @@ Future<void> _stage(Connection conn, List<TelemetryPacketModel> batch) async {
     signals.dispose();
     locations.dispose();
   }
+}
+
+/// Deletes staged rows whose parent does not exist: a `vehicle_id` missing
+/// from `vehicle`, or a `signal` missing from `signal_spec`.
+///
+/// This is the referential integrity a declared foreign key would give, moved
+/// to the ingest boundary (see `schema.dart`). A declared key would fail the
+/// whole set-based insert — and every other vehicle's readings with it — over
+/// one unknown id; here the orphan alone is dropped and counted. Runs before
+/// anything reads staging, so the log, latest values, geofences and the
+/// watermark all see the same filtered batch.
+Future<int> _dropOrphans(Connection conn) async {
+  final signals = await _countOf(conn, '''
+    DELETE FROM staging_signal s
+    WHERE NOT EXISTS (SELECT 1 FROM vehicle v WHERE v.vehicle_id = s.vehicle_id)
+       OR NOT EXISTS (SELECT 1 FROM signal_spec p WHERE p.signal = s.signal)
+  ''');
+  final locations = await _countOf(conn, '''
+    DELETE FROM staging_location l
+    WHERE NOT EXISTS (SELECT 1 FROM vehicle v WHERE v.vehicle_id = l.vehicle_id)
+  ''');
+  return signals + locations;
 }
 
 /// Appends the batch to the event log.

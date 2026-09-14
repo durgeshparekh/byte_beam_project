@@ -59,6 +59,7 @@ class IngestPage extends GetView<IngestController> {
                 ('Packets received', '${controller.packetsReceived}'),
                 ('Rows applied', '${controller.rowsApplied}'),
                 ('Duplicates rejected', '${controller.duplicatesRejected}'),
+                ('Orphans dropped', '${controller.orphansDropped}'),
                 ('Late vehicles', '${controller.lateVehicles}'),
                 ('Last batch', '${controller.lastBatchMs} ms'),
               ],

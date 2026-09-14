@@ -3,6 +3,20 @@
 /// to the asset bundle, and migrations run there.
 library;
 
+/// Keys: every table has a primary key. Facts and time-series rows use their
+/// natural composite key (`signal_reading` is `vehicle_id, signal, event_ts`),
+/// which is what makes redelivery a no-op via `ON CONFLICT DO NOTHING`; a
+/// surrogate id would store the duplicate. Entities without a natural key
+/// (`geofence`) or with repeated episodes (`alert`, `trip`) get an id column.
+///
+/// Foreign keys are logical, not declared: `vehicle_id` → `vehicle`,
+/// `signal` → `signal_spec`, `*geofence_id` → `geofence`. Ingest is one
+/// set-based insert per batch, so a declared key would roll back the whole
+/// fleet's batch over one unknown id; DuckDB also has no `ON DELETE CASCADE`
+/// and cannot add a foreign key to an existing table. Integrity is enforced at
+/// the ingest boundary instead (`_dropOrphans` in the writer isolate), and
+/// derived tables only ever gain rows through joins to their parents.
+///
 /// Forward-only. Append a new entry; never edit a shipped one.
 /// See ARCHITECTURE.md §3.5 — class D tables are dropped and rebuilt rather
 /// than migrated, so most schema changes add nothing here.

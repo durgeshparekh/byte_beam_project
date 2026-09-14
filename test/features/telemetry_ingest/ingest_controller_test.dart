@@ -68,6 +68,7 @@ IngestReceipt receipt({
   int applied = 4,
   int offered = 5,
   int late = 0,
+  int orphans = 0,
 }) {
   return IngestReceipt(
     packets: packets,
@@ -76,6 +77,7 @@ IngestReceipt receipt({
     locationRowsOffered: 0,
     locationRowsApplied: 0,
     lateVehicles: late,
+    orphanRows: orphans,
     duration: const Duration(milliseconds: 7),
   );
 }
@@ -131,6 +133,7 @@ void main() {
       applied: 4,
       offered: 6,
       late: 2,
+      orphans: 3,
     );
     controller.start();
 
@@ -149,6 +152,7 @@ void main() {
       reason: 'offered 6, applied 4',
     );
     expect(controller.lateVehicles.value, 2);
+    expect(controller.orphansDropped.value, 3);
     expect(controller.lastBatchMs.value, 7);
   });
 

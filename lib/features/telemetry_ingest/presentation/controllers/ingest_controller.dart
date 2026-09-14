@@ -57,6 +57,7 @@ class IngestController extends GetxController {
   final packetsReceived = 0.obs;
   final rowsApplied = 0.obs;
   final duplicatesRejected = 0.obs;
+  final orphansDropped = 0.obs;
   final lateVehicles = 0.obs;
   final batchesWritten = 0.obs;
 
@@ -121,6 +122,7 @@ class IngestController extends GetxController {
         rowsApplied.value +=
             value.signalRowsApplied + value.locationRowsApplied;
         duplicatesRejected.value += value.duplicateRows;
+        orphansDropped.value += value.orphanRows;
         lateVehicles.value += value.lateVehicles;
         batchesWritten.value += 1;
         lastBatchMs.value = value.duration.inMilliseconds;

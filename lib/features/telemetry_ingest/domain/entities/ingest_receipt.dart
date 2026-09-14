@@ -11,6 +11,7 @@ class IngestReceipt {
     required this.locationRowsOffered,
     required this.locationRowsApplied,
     required this.lateVehicles,
+    this.orphanRows = 0,
     required this.duration,
   });
 
@@ -22,6 +23,7 @@ class IngestReceipt {
       locationRowsOffered = 0,
       locationRowsApplied = 0,
       lateVehicles = 0,
+      orphanRows = 0,
       duration = Duration.zero;
 
   /// How many packets were in the batch.
@@ -43,6 +45,10 @@ class IngestReceipt {
   /// step 4). Counted now so the number is visible from the first commit.
   final int lateVehicles;
 
+  /// Staged rows dropped because their vehicle or signal is unknown. Counted
+  /// separately so they never inflate [duplicateRows].
+  final int orphanRows;
+
   /// Wall-clock time the batch took, measured in the writer isolate.
   final Duration duration;
 
@@ -56,5 +62,5 @@ class IngestReceipt {
   String toString() =>
       'IngestReceipt($packets packets, '
       '${signalRowsApplied + locationRowsApplied} applied, '
-      '$duplicateRows duplicates, $lateVehicles late, ${duration.inMilliseconds}ms)';
+      '$duplicateRows duplicates, $orphanRows orphans, $lateVehicles late, ${duration.inMilliseconds}ms)';
 }

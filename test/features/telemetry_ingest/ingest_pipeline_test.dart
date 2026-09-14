@@ -30,6 +30,11 @@ TelemetryPacketModel _packet(
   );
 }
 
+const _fleet = [
+  FleetVehicle(vehicleId: 'v1', regNo: 'KA01AB1234', model: 'eT 1000'),
+  FleetVehicle(vehicleId: 'v2', regNo: 'KA01CD5678', model: 'eT 1500'),
+];
+
 void main() {
   setUpAll(useHostDuckDb);
 
@@ -39,10 +44,7 @@ void main() {
   setUp(() async {
     db = await FleetDb.open(':memory:');
     local = await DuckDbTelemetryLocalDataSource.create(db);
-    await local.seedFleet(const [
-      FleetVehicle(vehicleId: 'v1', regNo: 'KA01AB1234', model: 'eT 1000'),
-      FleetVehicle(vehicleId: 'v2', regNo: 'KA01CD5678', model: 'eT 1500'),
-    ]);
+    await local.seedFleet(_fleet);
   });
 
   tearDown(() async {
@@ -105,6 +107,34 @@ void main() {
     expect(snapshot.signalRows, 3);
     expect(snapshot.locationRows, 1);
   });
+
+  test(
+    'orphan rows are dropped without failing the rest of the batch',
+    () async {
+      final receipt = await local.applyBatch([
+        _packet('v1', _at(0), signals: {'soc': 55, 'tyre_psi': 32}),
+        _packet(
+          'ghost',
+          _at(0),
+          signals: {'soc': 40},
+          location: const GeoFix(lat: 12.9, lon: 77.5, accuracyM: 6),
+        ),
+      ], _now);
+
+      expect(receipt.orphanRows, 3, reason: 'unknown signal, vehicle, fix');
+      expect(receipt.signalRowsApplied, 1, reason: 'v1 soc still lands');
+      expect(receipt.duplicateRows, 0, reason: 'orphans are not duplicates');
+
+      final orphans = await db.read.query('''
+      SELECT (SELECT count(*) FROM signal_reading WHERE vehicle_id = 'ghost'
+                OR signal = 'tyre_psi')
+           + (SELECT count(*) FROM location_fix WHERE vehicle_id = 'ghost')
+           + (SELECT count(*) FROM vehicle_signal_latest WHERE vehicle_id = 'ghost')
+           + (SELECT count(*) FROM ingest_watermark WHERE vehicle_id = 'ghost')
+    ''');
+      expect((orphans.fetchOne()!.first as num).toInt(), 0);
+    },
+  );
 
   test('a redelivered packet applies nothing (§0)', () async {
     final batch = [
@@ -212,6 +242,7 @@ void main() {
       await db.close();
       db = await FleetDb.open(':memory:');
       local = await DuckDbTelemetryLocalDataSource.create(db);
+      await local.seedFleet(_fleet);
 
       final shuffled = feed().reversed.toList();
       final messy = <TelemetryPacketModel>[
